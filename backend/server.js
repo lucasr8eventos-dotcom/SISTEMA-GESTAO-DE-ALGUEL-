@@ -38,7 +38,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Rate limit geral
 app.use('/api/', rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 300,
+  max: 100,
   message: { error: 'Muitas requisições. Tente novamente em 15 minutos.' }
 }));
 
@@ -53,16 +53,24 @@ const loginLimiter = rateLimit({
 // BANCO DE DADOS
 // ============================================================
 
-const pool = new Pool({
-  user: process.env.DB_USER || 'postgres',
-  host: process.env.DB_HOST || 'localhost',
-  database: process.env.DB_NAME || 'gestao_alugueis',
-  password: process.env.DB_PASSWORD || 'postgres',
-  port: parseInt(process.env.DB_PORT) || 5432,
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
-});
+const pool = process.env.DATABASE_URL
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+    })
+  : new Pool({
+      user: process.env.DB_USER || 'postgres',
+      host: process.env.DB_HOST || 'localhost',
+      database: process.env.DB_NAME || 'gestao_alugueis',
+      password: process.env.DB_PASSWORD,
+      port: parseInt(process.env.DB_PORT) || 5432,
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 2000,
+    });
 
 pool.connect((err, client, release) => {
   if (err) {
@@ -92,22 +100,31 @@ const upload = multer({
   storage,
   limits: { fileSize: (parseInt(process.env.MAX_FILE_SIZE_MB) || 10) * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowed = ['.pdf', '.jpg', '.jpeg', '.png'];
+    const allowedExts = ['.pdf', '.jpg', '.jpeg', '.png'];
+    const allowedMimes = ['application/pdf', 'image/jpeg', 'image/png'];
     const ext = path.extname(file.originalname).toLowerCase();
-    if (allowed.includes(ext)) return cb(null, true);
+    if (allowedExts.includes(ext) && allowedMimes.includes(file.mimetype)) return cb(null, true);
     cb(new Error('Tipo de arquivo não permitido. Use PDF, JPG ou PNG.'));
   }
 });
 
-app.use('/uploads', express.static(uploadDir));
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('Content-Disposition', 'attachment');
+  next();
+}, express.static(uploadDir));
 
 // ============================================================
 // AUTENTICAÇÃO E AUTORIZAÇÃO
 // ============================================================
 
 const JWT_SECRET = process.env.JWT_SECRET;
-if (!JWT_SECRET || JWT_SECRET.length < 16) {
-  console.warn('⚠️  JWT_SECRET não definido ou muito curto. Use uma string forte em produção!');
+if (!JWT_SECRET || JWT_SECRET.length < 32) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('FATAL: JWT_SECRET não definido ou muito curto. Encerrando em produção.');
+    process.exit(1);
+  } else {
+    console.warn('⚠️  JWT_SECRET não definido ou muito curto. Configure antes de ir para produção!');
+  }
 }
 
 const authenticateToken = (req, res, next) => {
@@ -115,7 +132,7 @@ const authenticateToken = (req, res, next) => {
   const token = authHeader && authHeader.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Token não fornecido' });
 
-  jwt.verify(token, JWT_SECRET || 'secretkey_dev_only', (err, user) => {
+  jwt.verify(token, JWT_SECRET || 'dev_only_secret_not_for_production_use', (err, user) => {
     if (err) return res.status(403).json({ error: 'Token inválido ou expirado' });
     req.user = user;
     next();
@@ -123,7 +140,7 @@ const authenticateToken = (req, res, next) => {
 };
 
 const authorizeAdmin = (req, res, next) => {
-  if (req.user.perfil !== 'admin') {
+  if (!req.user || req.user.perfil !== 'admin') {
     return res.status(403).json({ error: 'Acesso negado. Apenas administradores.' });
   }
   next();
@@ -156,7 +173,7 @@ const logAtividade = async (usuarioId, acao, entidade = null, entidadeId = null,
 
 app.post('/api/auth/login', loginLimiter, [
   body('email').isEmail().normalizeEmail(),
-  body('senha').isLength({ min: 3 })
+  body('senha').isLength({ min: 6 })
 ], validate, async (req, res) => {
   try {
     const { email, senha } = req.body;
@@ -178,7 +195,7 @@ app.post('/api/auth/login', loginLimiter, [
 
     const token = jwt.sign(
       { id: usuario.id, email: usuario.email, perfil: usuario.perfil, nome: usuario.nome },
-      JWT_SECRET || 'secretkey_dev_only',
+      JWT_SECRET || 'dev_only_secret_not_for_production_use',
       { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
     );
 
@@ -246,7 +263,8 @@ app.put('/api/usuarios/:id', authenticateToken, authorizeAdmin, [
   body('nome').trim().isLength({ min: 2, max: 255 }),
   body('email').isEmail().normalizeEmail(),
   body('perfil').isIn(['admin', 'operador']),
-  body('status').isIn(['ativo', 'inativo'])
+  body('status').isIn(['ativo', 'inativo']),
+  body('senha').optional().isLength({ min: 6 })
 ], validate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -888,7 +906,10 @@ app.delete('/api/pagamentos/:id', authenticateToken, authorizeAdmin, [
 });
 
 // Gerar recibos de todos os pagamentos do mês (lote)
-app.get('/api/pagamentos/recibos-lote', authenticateToken, async (req, res) => {
+app.get('/api/pagamentos/recibos-lote', authenticateToken, [
+  query('mes').isInt({ min: 1, max: 12 }),
+  query('ano').isInt({ min: 2000, max: 2099 })
+], validate, async (req, res) => {
   try {
     const { mes, ano } = req.query;
     if (!mes || !ano) return res.status(400).json({ error: 'Informe mês e ano' });
@@ -1288,7 +1309,10 @@ app.get('/api/dashboard/evolucao', authenticateToken, async (req, res) => {
 // ============================================================
 
 // Relatório mensal de aluguéis
-app.get('/api/relatorios/mensal', authenticateToken, async (req, res) => {
+app.get('/api/relatorios/mensal', authenticateToken, [
+  query('mes').isInt({ min: 1, max: 12 }),
+  query('ano').isInt({ min: 2000, max: 2099 })
+], validate, async (req, res) => {
   try {
     const { mes, ano } = req.query;
     if (!mes || !ano) return res.status(400).json({ error: 'Informe mês e ano' });
@@ -1333,7 +1357,9 @@ app.get('/api/relatorios/imoveis-vagos', authenticateToken, async (req, res) => 
 });
 
 // Relatório de contratos vencendo
-app.get('/api/relatorios/contratos-vencendo', authenticateToken, async (req, res) => {
+app.get('/api/relatorios/contratos-vencendo', authenticateToken, [
+  query('dias').optional().isInt({ min: 1, max: 365 })
+], validate, async (req, res) => {
   try {
     const { dias = 60 } = req.query;
     const result = await pool.query(`
@@ -1353,7 +1379,10 @@ app.get('/api/relatorios/contratos-vencendo', authenticateToken, async (req, res
 });
 
 // Relatório de despesas
-app.get('/api/relatorios/despesas', authenticateToken, async (req, res) => {
+app.get('/api/relatorios/despesas', authenticateToken, [
+  query('mes').optional().isInt({ min: 1, max: 12 }),
+  query('ano').optional().isInt({ min: 2000, max: 2099 })
+], validate, async (req, res) => {
   try {
     const { mes, ano } = req.query;
     let queryStr = `
