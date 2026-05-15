@@ -232,11 +232,12 @@ ORDER BY dias_atraso DESC;
 -- DADOS INICIAIS
 -- ============================================================
 
--- Senha: admin123
+-- Senha: admin123 (hash bcrypt rounds=10)
 INSERT INTO usuarios (nome, email, senha, perfil, status) VALUES
 ('Administrador', 'admin@sistema.com', '$2a$10$vI8aWBnW3fID.yDY5J5Hv.XKzDQ8Y8e8dO.vFU8FqJC6WfVV9mGaS', 'admin', 'ativo');
 
--- Senha: oper123
+-- Senha: admin123 (mesmo hash — gere um hash separado para oper123 em produção)
+-- Para trocar a senha, execute: UPDATE usuarios SET senha=crypt('oper123', gen_salt('bf')) WHERE email='operador@sistema.com';
 INSERT INTO usuarios (nome, email, senha, perfil, status) VALUES
 ('Operador', 'operador@sistema.com', '$2a$10$vI8aWBnW3fID.yDY5J5Hv.XKzDQ8Y8e8dO.vFU8FqJC6WfVV9mGaS', 'operador', 'ativo');
 

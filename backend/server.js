@@ -656,12 +656,29 @@ app.put('/api/contratos/:id', authenticateToken, upload.single('arquivo_pdf'), [
 
     const arquivo_pdf = req.file ? req.file.filename : contrato.rows[0].arquivo_pdf;
 
+    const contratoAntes = contrato.rows[0];
+
     const result = await pool.query(
       `UPDATE contratos SET imovel_id=$1, inquilino_id=$2, data_inicio=$3, data_fim=$4,
         valor=$5, garantia=$6, status=$7, arquivo_pdf=$8, observacoes=$9, updated_at=NOW()
        WHERE id=$10 RETURNING *`,
       [imovel_id, inquilino_id, data_inicio, data_fim, valor, garantia, status, arquivo_pdf, observacoes, id]
     );
+
+    // Sincroniza status do imóvel quando o status do contrato muda
+    if (contratoAntes.status !== status) {
+      if (status === 'ativo') {
+        await pool.query("UPDATE imoveis SET status='alugado' WHERE id=$1", [imovel_id]);
+      } else if (status === 'encerrado' || status === 'vencido') {
+        const outrosAtivos = await pool.query(
+          "SELECT id FROM contratos WHERE imovel_id=$1 AND status='ativo' AND id<>$2",
+          [imovel_id, id]
+        );
+        if (outrosAtivos.rows.length === 0) {
+          await pool.query("UPDATE imoveis SET status='vago' WHERE id=$1", [imovel_id]);
+        }
+      }
+    }
 
     await logAtividade(req.user.id, 'editar_contrato', 'contratos', parseInt(id), null, req.ip);
     res.json(result.rows[0]);
@@ -1128,7 +1145,7 @@ app.get('/api/dashboard/evolucao', authenticateToken, async (req, res) => {
         SUM(valor_aluguel) as total_receber,
         SUM(CASE WHEN status IN ('pago','parcial') THEN COALESCE(valor_recebido,0) ELSE 0 END) as total_recebido
       FROM pagamentos
-      WHERE (ano * 100 + mes) >= ((EXTRACT(YEAR FROM NOW()) * 100 + EXTRACT(MONTH FROM NOW())) - 5)
+      WHERE (ano * 12 + mes) >= ((EXTRACT(YEAR FROM NOW())::int * 12 + EXTRACT(MONTH FROM NOW())::int) - 5)
       GROUP BY mes, ano
       ORDER BY ano, mes
     `);

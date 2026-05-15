@@ -11,6 +11,7 @@ export default function Relatorios() {
   const [filtroAno, setFiltroAno] = useState(getAnoAtual());
   const [dados, setDados] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [exportando, setExportando] = useState(false);
   const [buscou, setBuscou] = useState(false);
   const toast = useToast();
 
@@ -37,6 +38,8 @@ export default function Relatorios() {
   };
 
   const exportar = async (formato) => {
+    if (exportando) return;
+    setExportando(true);
     try {
       const params = { tipo: abaAtiva, mes: filtroMes, ano: filtroAno };
       let res, filename;
@@ -51,6 +54,8 @@ export default function Relatorios() {
       toast.success(`Exportado como ${formato.toUpperCase()}!`);
     } catch {
       toast.error('Erro ao exportar relatório');
+    } finally {
+      setExportando(false);
     }
   };
 
@@ -231,8 +236,12 @@ export default function Relatorios() {
             </button>
             {buscou && dados.length > 0 && (
               <>
-                <button className="btn btn-success btn-sm" onClick={() => exportar('excel')}>📊 Excel</button>
-                <button className="btn btn-danger btn-sm" onClick={() => exportar('pdf')}>📄 PDF</button>
+                <button className="btn btn-success btn-sm" onClick={() => exportar('excel')} disabled={exportando}>
+                  {exportando ? '⏳...' : '📊 Excel'}
+                </button>
+                <button className="btn btn-danger btn-sm" onClick={() => exportar('pdf')} disabled={exportando}>
+                  {exportando ? '⏳...' : '📄 PDF'}
+                </button>
               </>
             )}
           </div>

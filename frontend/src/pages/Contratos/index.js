@@ -72,6 +72,10 @@ export default function Contratos() {
 
   const handleSalvar = async (e) => {
     e.preventDefault();
+    if (form.data_fim && form.data_inicio && form.data_fim <= form.data_inicio) {
+      toast.error('A data de fim deve ser posterior à data de início');
+      return;
+    }
     setSalvando(true);
     try {
       const fd = new FormData();

@@ -127,7 +127,12 @@ export default function Pagamentos() {
   const setF = (campo, valor) => setForm(prev => ({ ...prev, [campo]: valor }));
 
   const totalReceber = pagamentos.reduce((s, p) => s + parseFloat(p.valor_aluguel || 0), 0);
-  const totalRecebido = pagamentos.filter(p => p.status === 'pago' || p.status === 'parcial').reduce((s, p) => s + parseFloat(p.valor_recebido || 0), 0);
+  const totalRecebido = pagamentos
+    .filter(p => p.status === 'pago' || p.status === 'parcial')
+    .reduce((s, p) => {
+      if (p.status === 'pago') return s + parseFloat(p.valor_recebido || p.valor_aluguel || 0);
+      return s + parseFloat(p.valor_recebido || 0);
+    }, 0);
 
   const anos = Array.from({ length: 5 }, (_, i) => getAnoAtual() - 2 + i);
 

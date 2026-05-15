@@ -70,6 +70,14 @@ export default function Imoveis() {
 
   const handleSalvar = async (e) => {
     e.preventDefault();
+    if (
+      f.valor_com_desconto &&
+      f.valor_sem_desconto &&
+      parseFloat(f.valor_com_desconto) > parseFloat(f.valor_sem_desconto)
+    ) {
+      toast.error('O valor com desconto não pode ser maior que o valor sem desconto');
+      return;
+    }
     setSalvando(true);
     try {
       if (editando) {
