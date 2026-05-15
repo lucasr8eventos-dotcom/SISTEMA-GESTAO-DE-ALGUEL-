@@ -6,6 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
 import { MoneyInput } from '../../components/MaskedInput';
 import { formatMoeda, formatData, statusDespesa, tipoDespesaLabel, getMesAtual, getAnoAtual, MESES } from '../../utils/format';
+import Pagination, { PER_PAGE } from '../../components/Pagination';
 
 const FORM_INICIAL = {
   imovel_id: '', tipo: 'iptu', valor: '', vencimento: '',
@@ -25,6 +26,7 @@ export default function Despesas() {
   const [form, setForm] = useState(FORM_INICIAL);
   const [editando, setEditando] = useState(null);
   const [salvando, setSalvando] = useState(false);
+  const [page, setPage] = useState(1);
   const toast = useToast();
   const { isAdmin } = useAuth();
   const location = useLocation();
@@ -53,6 +55,7 @@ export default function Despesas() {
   }, [filtroStatus, filtroTipo, filtroMes, filtroAno]);
 
   useEffect(() => { fetchDespesas(); }, [fetchDespesas]);
+  useEffect(() => { setPage(1); }, [filtroStatus, filtroTipo, filtroMes, filtroAno]);
   useEffect(() => { imoveisService.listar().then(r => setImoveis(r.data)).catch(() => {}); }, []);
 
   const abrirNovo = () => {
@@ -107,6 +110,8 @@ export default function Despesas() {
   };
 
   const setF = (campo, valor) => setForm(prev => ({ ...prev, [campo]: valor }));
+
+  const paginatedDespesas = despesas.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
   const totalDespesas = despesas.reduce((s, d) => s + parseFloat(d.valor || 0), 0);
   const totalPago = despesas.filter(d => d.status === 'pago').reduce((s, d) => s + parseFloat(d.valor || 0), 0);
@@ -188,7 +193,7 @@ export default function Despesas() {
                 </tr>
               </thead>
               <tbody>
-                {despesas.map((d) => {
+                {paginatedDespesas.map((d) => {
                   const st = statusDespesa(d.status);
                   return (
                     <tr key={d.id}>
@@ -214,6 +219,7 @@ export default function Despesas() {
             </table>
           )}
         </div>
+        <Pagination total={despesas.length} page={page} perPage={PER_PAGE} onChange={setPage} />
       </div>
 
       <Modal

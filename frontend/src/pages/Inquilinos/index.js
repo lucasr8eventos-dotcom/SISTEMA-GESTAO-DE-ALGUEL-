@@ -6,6 +6,7 @@ import Modal, { ConfirmDialog } from '../../components/Modal';
 import { CpfCnpjInput, PhoneInput } from '../../components/MaskedInput';
 import { formatCpfCnpj, formatTelefone } from '../../utils/format';
 import { maskCpfCnpj, maskPhone } from '../../utils/masks';
+import Pagination, { PER_PAGE } from '../../components/Pagination';
 
 const FORM_INICIAL = { nome: '', cpf_cnpj: '', telefone: '', email: '', endereco: '', observacoes: '' };
 
@@ -18,6 +19,7 @@ export default function Inquilinos() {
   const [form, setForm] = useState(FORM_INICIAL);
   const [editando, setEditando] = useState(null);
   const [salvando, setSalvando] = useState(false);
+  const [page, setPage] = useState(1);
   const toast = useToast();
   const { isAdmin } = useAuth();
 
@@ -37,6 +39,8 @@ export default function Inquilinos() {
     const t = setTimeout(fetchInquilinos, 300);
     return () => clearTimeout(t);
   }, [fetchInquilinos]);
+
+  useEffect(() => { setPage(1); }, [busca]);
 
   const abrirNovo = () => {
     setEditando(null);
@@ -90,6 +94,8 @@ export default function Inquilinos() {
 
   const setF = (campo, valor) => setForm(prev => ({ ...prev, [campo]: valor }));
 
+  const paginatedInquilinos = inquilinos.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+
   return (
     <div>
       <div className="page-header">
@@ -135,7 +141,7 @@ export default function Inquilinos() {
                 </tr>
               </thead>
               <tbody>
-                {inquilinos.map((inq) => (
+                {paginatedInquilinos.map((inq) => (
                   <tr key={inq.id}>
                     <td><strong>{inq.nome}</strong></td>
                     <td>{formatCpfCnpj(inq.cpf_cnpj)}</td>
@@ -156,6 +162,7 @@ export default function Inquilinos() {
             </table>
           )}
         </div>
+        <Pagination total={inquilinos.length} page={page} perPage={PER_PAGE} onChange={setPage} />
       </div>
 
       <Modal

@@ -639,6 +639,10 @@ app.post('/api/contratos', authenticateToken, upload.single('arquivo_pdf'), [
     const { imovel_id, inquilino_id, data_inicio, data_fim, valor, garantia, status, observacoes } = req.body;
     const arquivo_pdf = req.file ? req.file.filename : null;
 
+    if (new Date(data_fim) <= new Date(data_inicio)) {
+      return res.status(400).json({ error: 'A data de fim deve ser posterior à data de início' });
+    }
+
     if (status === 'ativo') {
       const contratoAtivo = await pool.query(
         "SELECT id FROM contratos WHERE imovel_id=$1 AND status='ativo'", [imovel_id]
@@ -683,6 +687,10 @@ app.put('/api/contratos/:id', authenticateToken, upload.single('arquivo_pdf'), [
     if (contrato.rows.length === 0) return res.status(404).json({ error: 'Contrato não encontrado' });
 
     const arquivo_pdf = req.file ? req.file.filename : contrato.rows[0].arquivo_pdf;
+
+    if (new Date(data_fim) <= new Date(data_inicio)) {
+      return res.status(400).json({ error: 'A data de fim deve ser posterior à data de início' });
+    }
 
     const contratoAntes = contrato.rows[0];
 
@@ -876,6 +884,64 @@ app.delete('/api/pagamentos/:id', authenticateToken, authorizeAdmin, [
     res.json({ message: 'Pagamento excluído com sucesso' });
   } catch (error) {
     res.status(500).json({ error: 'Erro no servidor' });
+  }
+});
+
+// Gerar recibos de todos os pagamentos do mês (lote)
+app.get('/api/pagamentos/recibos-lote', authenticateToken, async (req, res) => {
+  try {
+    const { mes, ano } = req.query;
+    if (!mes || !ano) return res.status(400).json({ error: 'Informe mês e ano' });
+
+    const result = await pool.query(`
+      SELECT p.*, i.codigo as imovel_codigo, i.endereco as imovel_endereco,
+             inq.nome as inquilino_nome, inq.cpf_cnpj as inquilino_documento
+      FROM pagamentos p
+      LEFT JOIN imoveis i ON p.imovel_id = i.id
+      LEFT JOIN contratos c ON c.id = p.contrato_id
+      LEFT JOIN inquilinos inq ON c.inquilino_id = inq.id
+      WHERE p.mes=$1 AND p.ano=$2 AND p.status IN ('pago','parcial')
+      ORDER BY i.codigo
+    `, [mes, ano]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Nenhum pagamento pago encontrado para este mês/ano' });
+    }
+
+    const meses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=recibos-${mes}-${ano}.pdf`);
+    doc.pipe(res);
+
+    result.rows.forEach((p, idx) => {
+      if (idx > 0) doc.addPage();
+
+      doc.fontSize(20).fillColor('#1e3a5f').text('RECIBO DE ALUGUEL', { align: 'center' });
+      doc.moveDown(0.5);
+      doc.fontSize(12).fillColor('#333').text(`Referência: ${meses[p.mes - 1]}/${p.ano}`, { align: 'center' });
+      doc.moveDown(0.5);
+      doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke('#1e3a5f');
+      doc.moveDown();
+
+      doc.fontSize(11);
+      doc.text(`Imóvel: ${p.imovel_codigo} — ${p.imovel_endereco}`);
+      doc.text(`Inquilino: ${p.inquilino_nome || 'N/A'}`);
+      doc.text(`CPF/CNPJ: ${p.inquilino_documento || 'N/A'}`);
+      doc.moveDown();
+      doc.text(`Valor do Aluguel: R$ ${parseFloat(p.valor_aluguel).toFixed(2)}`);
+      doc.text(`Valor Recebido: R$ ${parseFloat(p.valor_recebido || p.valor_aluguel || 0).toFixed(2)}`);
+      doc.text(`Data do Pagamento: ${p.data_pagamento ? new Date(p.data_pagamento).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : 'N/A'}`);
+      doc.text(`Forma de Pagamento: ${p.forma_pagamento || 'N/A'}`);
+      doc.text(`Status: ${p.status.toUpperCase()}`);
+      doc.moveDown(3);
+      doc.moveTo(50, doc.y).lineTo(250, doc.y).stroke('#666');
+      doc.text('Assinatura do Locador', 50, doc.y + 5);
+    });
+
+    doc.end();
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao gerar recibos' });
   }
 });
 

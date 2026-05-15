@@ -73,7 +73,8 @@ export const pagamentosService = {
   criar: (dados) => api.post('/pagamentos', dados),
   atualizar: (id, dados) => api.put(`/pagamentos/${id}`, dados),
   excluir: (id) => api.delete(`/pagamentos/${id}`),
-  recibo: (id) => api.get(`/pagamentos/${id}/recibo`, { responseType: 'blob' })
+  recibo: (id) => api.get(`/pagamentos/${id}/recibo`, { responseType: 'blob' }),
+  recibosLote: (params) => api.get('/pagamentos/recibos-lote', { params, responseType: 'blob' })
 };
 
 // ===== DESPESAS =====
