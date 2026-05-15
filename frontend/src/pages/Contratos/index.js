@@ -3,6 +3,7 @@ import { contratosService, imoveisService, inquilinosService } from '../../servi
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
+import { MoneyInput } from '../../components/MaskedInput';
 import { formatMoeda, formatData, statusContrato, garantiaLabel } from '../../utils/format';
 
 const FORM_INICIAL = {
@@ -262,7 +263,7 @@ export default function Contratos() {
           <div className="form-grid-3">
             <div className="form-group">
               <label className="form-label">Valor do Aluguel <span className="required">*</span></label>
-              <input className="form-control" type="number" step="0.01" min="0" value={form.valor} onChange={(e) => setF('valor', e.target.value)} required />
+              <MoneyInput value={form.valor} onChange={(v) => setF('valor', v)} required />
             </div>
             <div className="form-group">
               <label className="form-label">Garantia <span className="required">*</span></label>

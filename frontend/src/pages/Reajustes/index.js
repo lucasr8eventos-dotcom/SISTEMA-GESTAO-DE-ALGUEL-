@@ -3,6 +3,7 @@ import { reajustesService, imoveisService, contratosService } from '../../servic
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
+import { MoneyInput } from '../../components/MaskedInput';
 import { formatMoeda, formatData, statusReajuste } from '../../utils/format';
 
 const FORM_INICIAL = {
@@ -244,11 +245,11 @@ export default function Reajustes() {
           <div className="form-grid">
             <div className="form-group">
               <label className="form-label">Valor Atual <span className="required">*</span></label>
-              <input className="form-control" type="number" step="0.01" min="0" value={form.valor_atual} onChange={(e) => setF('valor_atual', e.target.value)} required />
+              <MoneyInput value={form.valor_atual} onChange={(v) => setF('valor_atual', v)} required />
             </div>
             <div className="form-group">
               <label className="form-label">Percentual de Reajuste (%) <span className="required">*</span></label>
-              <input className="form-control" type="number" step="0.01" min="0" max="100" value={form.percentual} onChange={(e) => setF('percentual', e.target.value)} required />
+              <input className="form-control" type="number" step="0.01" min="0" value={form.percentual} onChange={(e) => setF('percentual', e.target.value)} required />
             </div>
           </div>
 

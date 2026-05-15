@@ -3,7 +3,9 @@ import { inquilinosService } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
+import { CpfCnpjInput, PhoneInput } from '../../components/MaskedInput';
 import { formatCpfCnpj, formatTelefone } from '../../utils/format';
+import { maskCpfCnpj, maskPhone } from '../../utils/masks';
 
 const FORM_INICIAL = { nome: '', cpf_cnpj: '', telefone: '', email: '', endereco: '', observacoes: '' };
 
@@ -46,8 +48,8 @@ export default function Inquilinos() {
     setEditando(inq.id);
     setForm({
       nome: inq.nome || '',
-      cpf_cnpj: inq.cpf_cnpj || '',
-      telefone: inq.telefone || '',
+      cpf_cnpj: maskCpfCnpj(inq.cpf_cnpj || ''),
+      telefone: maskPhone(inq.telefone || ''),
       email: inq.email || '',
       endereco: inq.endereco || '',
       observacoes: inq.observacoes || ''
@@ -177,11 +179,11 @@ export default function Inquilinos() {
           <div className="form-grid">
             <div className="form-group">
               <label className="form-label">CPF / CNPJ <span className="required">*</span></label>
-              <input className="form-control" value={form.cpf_cnpj} onChange={(e) => setF('cpf_cnpj', e.target.value)} required placeholder="000.000.000-00" />
+              <CpfCnpjInput value={form.cpf_cnpj} onChange={(v) => setF('cpf_cnpj', v)} required />
             </div>
             <div className="form-group">
               <label className="form-label">Telefone <span className="required">*</span></label>
-              <input className="form-control" value={form.telefone} onChange={(e) => setF('telefone', e.target.value)} required placeholder="(00) 00000-0000" />
+              <PhoneInput value={form.telefone} onChange={(v) => setF('telefone', v)} required />
             </div>
           </div>
           <div className="form-group">

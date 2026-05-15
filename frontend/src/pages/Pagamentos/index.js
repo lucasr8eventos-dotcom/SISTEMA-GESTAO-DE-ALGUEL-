@@ -4,6 +4,7 @@ import { pagamentosService, imoveisService, contratosService, downloadBlob } fro
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
+import { MoneyInput } from '../../components/MaskedInput';
 import { formatMoeda, formatData, getMesAtual, getAnoAtual, MESES, formaPagamentoLabel } from '../../utils/format';
 
 const FORM_INICIAL = {
@@ -351,7 +352,7 @@ export default function Pagamentos() {
           <div className="form-grid">
             <div className="form-group">
               <label className="form-label">Valor do Aluguel <span className="required">*</span></label>
-              <input className="form-control" type="number" step="0.01" min="0" value={form.valor_aluguel} onChange={(e) => setF('valor_aluguel', e.target.value)} required />
+              <MoneyInput value={form.valor_aluguel} onChange={(v) => setF('valor_aluguel', v)} required />
             </div>
             <div className="form-group">
               <label className="form-label">Data de Vencimento <span className="required">*</span></label>
@@ -366,7 +367,7 @@ export default function Pagamentos() {
             </div>
             <div className="form-group">
               <label className="form-label">Valor Recebido</label>
-              <input className="form-control" type="number" step="0.01" min="0" value={form.valor_recebido} onChange={(e) => setF('valor_recebido', e.target.value)} />
+              <MoneyInput value={form.valor_recebido} onChange={(v) => setF('valor_recebido', v)} />
             </div>
             <div className="form-group">
               <label className="form-label">Forma de Pagamento</label>

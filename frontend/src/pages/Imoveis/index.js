@@ -4,6 +4,7 @@ import { imoveisService } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
+import { MoneyInput } from '../../components/MaskedInput';
 import { formatMoeda, statusImovel, tipoImovel } from '../../utils/format';
 
 const FORM_INICIAL = {
@@ -254,11 +255,11 @@ export default function Imoveis() {
           <div className="form-grid-3">
             <div className="form-group">
               <label className="form-label">Valor s/ Desconto <span className="required">*</span></label>
-              <input className="form-control" type="number" step="0.01" min="0" value={f.valor_sem_desconto} onChange={(e) => setF('valor_sem_desconto', e.target.value)} required />
+              <MoneyInput value={f.valor_sem_desconto} onChange={(v) => setF('valor_sem_desconto', v)} required />
             </div>
             <div className="form-group">
               <label className="form-label">Valor c/ Desconto</label>
-              <input className="form-control" type="number" step="0.01" min="0" value={f.valor_com_desconto} onChange={(e) => setF('valor_com_desconto', e.target.value)} />
+              <MoneyInput value={f.valor_com_desconto} onChange={(v) => setF('valor_com_desconto', v)} />
             </div>
             <div className="form-group">
               <label className="form-label">Dia de Vencimento <span className="required">*</span></label>

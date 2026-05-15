@@ -335,7 +335,11 @@ app.post('/api/inquilinos', authenticateToken, [
   try {
     const { nome, cpf_cnpj, telefone, email, endereco, observacoes } = req.body;
 
-    const existe = await pool.query('SELECT id FROM inquilinos WHERE cpf_cnpj=$1', [cpf_cnpj]);
+    const cpfDigits = cpf_cnpj.replace(/\D/g, '');
+    const existe = await pool.query(
+      "SELECT id FROM inquilinos WHERE REGEXP_REPLACE(cpf_cnpj, '[^0-9]', '', 'g') = $1",
+      [cpfDigits]
+    );
     if (existe.rows.length > 0) {
       return res.status(400).json({ error: 'CPF/CNPJ já cadastrado' });
     }

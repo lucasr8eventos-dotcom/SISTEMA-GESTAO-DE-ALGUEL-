@@ -4,6 +4,7 @@ import { despesasService, imoveisService } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
+import { MoneyInput } from '../../components/MaskedInput';
 import { formatMoeda, formatData, statusDespesa, tipoDespesaLabel, getMesAtual, getAnoAtual, MESES } from '../../utils/format';
 
 const FORM_INICIAL = {
@@ -261,7 +262,7 @@ export default function Despesas() {
           <div className="form-grid">
             <div className="form-group">
               <label className="form-label">Valor <span className="required">*</span></label>
-              <input className="form-control" type="number" step="0.01" min="0" value={form.valor} onChange={(e) => setF('valor', e.target.value)} required />
+              <MoneyInput value={form.valor} onChange={(v) => setF('valor', v)} required />
             </div>
             <div className="form-group">
               <label className="form-label">Vencimento <span className="required">*</span></label>
