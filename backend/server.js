@@ -620,6 +620,15 @@ app.post('/api/contratos', authenticateToken, upload.single('arquivo_pdf'), [
     const { imovel_id, inquilino_id, data_inicio, data_fim, valor, garantia, status, observacoes } = req.body;
     const arquivo_pdf = req.file ? req.file.filename : null;
 
+    if (status === 'ativo') {
+      const contratoAtivo = await pool.query(
+        "SELECT id FROM contratos WHERE imovel_id=$1 AND status='ativo'", [imovel_id]
+      );
+      if (contratoAtivo.rows.length > 0) {
+        return res.status(400).json({ error: 'Este imóvel já possui um contrato ativo. Encerre o contrato atual antes de criar um novo.' });
+      }
+    }
+
     const result = await pool.query(
       `INSERT INTO contratos (imovel_id, inquilino_id, data_inicio, data_fim, valor, garantia, status, arquivo_pdf, observacoes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
@@ -752,6 +761,14 @@ app.post('/api/pagamentos', authenticateToken, [
       mes, ano, imovel_id, contrato_id, valor_aluguel, data_vencimento,
       data_pagamento, valor_recebido, forma_pagamento, status, observacoes
     } = req.body;
+
+    const duplicado = await pool.query(
+      'SELECT id FROM pagamentos WHERE mes=$1 AND ano=$2 AND imovel_id=$3',
+      [mes, ano, imovel_id]
+    );
+    if (duplicado.rows.length > 0) {
+      return res.status(400).json({ error: `Já existe um pagamento registrado para este imóvel em ${mes}/${ano}. Edite o registro existente.` });
+    }
 
     const result = await pool.query(
       `INSERT INTO pagamentos (mes, ano, imovel_id, contrato_id, valor_aluguel, data_vencimento,

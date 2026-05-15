@@ -77,11 +77,13 @@ export default function Login() {
           </button>
         </form>
 
-        <div style={{ marginTop: 24, padding: 16, background: 'var(--gray-50)', borderRadius: 'var(--radius)', fontSize: 13, color: 'var(--gray-500)' }}>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>Credenciais de acesso:</div>
-          <div>Admin: admin@sistema.com / admin123</div>
-          <div>Operador: operador@sistema.com / oper123</div>
-        </div>
+        {process.env.NODE_ENV === 'development' && (
+          <div style={{ marginTop: 24, padding: 16, background: 'var(--gray-50)', borderRadius: 'var(--radius)', fontSize: 13, color: 'var(--gray-500)', border: '1px dashed var(--gray-300)' }}>
+            <div style={{ fontWeight: 600, marginBottom: 6 }}>🛠 Ambiente de desenvolvimento</div>
+            <div>Admin: admin@sistema.com / admin123</div>
+            <div>Operador: operador@sistema.com / admin123</div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { imoveisService } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -25,6 +26,13 @@ export default function Imoveis() {
   const [historico, setHistorico] = useState([]);
   const toast = useToast();
   const { isAdmin } = useAuth();
+  const location = useLocation();
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const s = params.get('status');
+    if (s) setFiltroStatus(s);
+  }, [location.search]);
 
   const fetchImoveis = useCallback(async () => {
     setLoading(true);

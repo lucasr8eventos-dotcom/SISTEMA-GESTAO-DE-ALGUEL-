@@ -227,9 +227,14 @@ export default function Contratos() {
               <label className="form-label">Imóvel <span className="required">*</span></label>
               <select className="form-control" value={form.imovel_id} onChange={(e) => setF('imovel_id', e.target.value)} required>
                 <option value="">Selecione...</option>
-                {imoveis.map(im => (
-                  <option key={im.id} value={im.id}>{im.codigo} — {im.endereco}</option>
-                ))}
+                {imoveis.map(im => {
+                  const statusLabel = { vago: '🟢 Vago', alugado: '🔴 Alugado', negociacao: '🟡 Negociação', encerrado: '⚫ Encerrado' };
+                  return (
+                    <option key={im.id} value={im.id}>
+                      {im.codigo} — {im.endereco} [{statusLabel[im.status] || im.status}]
+                    </option>
+                  );
+                })}
               </select>
             </div>
             <div className="form-group">

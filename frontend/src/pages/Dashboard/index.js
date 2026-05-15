@@ -74,6 +74,12 @@ export default function Dashboard() {
 
   return (
     <div>
+      <div style={{ marginBottom: 20 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--gray-800)', margin: 0 }}>Dashboard</h1>
+        <p style={{ color: 'var(--gray-500)', margin: '4px 0 0', fontSize: 14 }}>
+          Resumo de {mesAtual} de {anoAtual}
+        </p>
+      </div>
       <div className="stats-grid">
         <StatCard
           icon="🏠"
