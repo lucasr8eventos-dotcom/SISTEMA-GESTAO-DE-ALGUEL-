@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { imoveisService } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
-import { formatMoeda, statusImovel, tipoImovel } from '../../utils/format';
+import { MoneyInput } from '../../components/MaskedInput';
+import { formatMoeda, formatData, statusImovel, tipoImovel } from '../../utils/format';
 
 const FORM_INICIAL = {
   codigo: '', tipo: 'apartamento', endereco: '', valor_sem_desconto: '', valor_com_desconto: '',
@@ -25,6 +27,13 @@ export default function Imoveis() {
   const [historico, setHistorico] = useState([]);
   const toast = useToast();
   const { isAdmin } = useAuth();
+  const location = useLocation();
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const s = params.get('status');
+    if (s) setFiltroStatus(s);
+  }, [location.search]);
 
   const fetchImoveis = useCallback(async () => {
     setLoading(true);
@@ -70,6 +79,14 @@ export default function Imoveis() {
 
   const handleSalvar = async (e) => {
     e.preventDefault();
+    if (
+      form.valor_com_desconto &&
+      form.valor_sem_desconto &&
+      parseFloat(form.valor_com_desconto) > parseFloat(form.valor_sem_desconto)
+    ) {
+      toast.error('O valor com desconto não pode ser maior que o valor sem desconto');
+      return;
+    }
     setSalvando(true);
     try {
       if (editando) {
@@ -238,11 +255,11 @@ export default function Imoveis() {
           <div className="form-grid-3">
             <div className="form-group">
               <label className="form-label">Valor s/ Desconto <span className="required">*</span></label>
-              <input className="form-control" type="number" step="0.01" min="0" value={f.valor_sem_desconto} onChange={(e) => setF('valor_sem_desconto', e.target.value)} required />
+              <MoneyInput value={f.valor_sem_desconto} onChange={(v) => setF('valor_sem_desconto', v)} required />
             </div>
             <div className="form-group">
               <label className="form-label">Valor c/ Desconto</label>
-              <input className="form-control" type="number" step="0.01" min="0" value={f.valor_com_desconto} onChange={(e) => setF('valor_com_desconto', e.target.value)} />
+              <MoneyInput value={f.valor_com_desconto} onChange={(v) => setF('valor_com_desconto', v)} />
             </div>
             <div className="form-group">
               <label className="form-label">Dia de Vencimento <span className="required">*</span></label>
@@ -316,8 +333,8 @@ export default function Imoveis() {
                     <td>{p.mes}/{p.ano}</td>
                     <td>{p.inquilino_nome || '—'}</td>
                     <td>{formatMoeda(p.valor_aluguel)}</td>
-                    <td>{p.data_vencimento ? new Date(p.data_vencimento).toLocaleDateString('pt-BR') : '—'}</td>
-                    <td>{p.data_pagamento ? new Date(p.data_pagamento).toLocaleDateString('pt-BR') : '—'}</td>
+                    <td>{formatData(p.data_vencimento)}</td>
+                    <td>{formatData(p.data_pagamento)}</td>
                     <td>
                       <span className={`badge badge-${p.status === 'pago' ? 'success' : p.status === 'atrasado' ? 'danger' : p.status === 'parcial' ? 'info' : 'warning'}`}>
                         {p.status}

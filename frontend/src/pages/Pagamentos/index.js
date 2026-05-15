@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { pagamentosService, imoveisService, contratosService, downloadBlob } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
+import { MoneyInput } from '../../components/MaskedInput';
 import { formatMoeda, formatData, getMesAtual, getAnoAtual, MESES, formaPagamentoLabel } from '../../utils/format';
 
 const FORM_INICIAL = {
@@ -33,6 +35,13 @@ export default function Pagamentos() {
   const [salvando, setSalvando] = useState(false);
   const toast = useToast();
   const { isAdmin } = useAuth();
+  const location = useLocation();
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const s = params.get('status');
+    if (s) setFiltroStatus(s);
+  }, [location.search]);
 
   const fetchPagamentos = useCallback(async () => {
     setLoading(true);
@@ -124,10 +133,50 @@ export default function Pagamentos() {
     }
   };
 
-  const setF = (campo, valor) => setForm(prev => ({ ...prev, [campo]: valor }));
+  const calcVencimento = (imovelId, mes, ano) => {
+    const imovel = imoveis.find(im => String(im.id) === String(imovelId));
+    if (!imovel || !imovel.dia_vencimento) return '';
+    const dia = Math.min(imovel.dia_vencimento, new Date(ano, mes, 0).getDate());
+    return `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+  };
+
+  const setF = (campo, valor) => setForm(prev => {
+    const next = { ...prev, [campo]: valor };
+
+    if (campo === 'imovel_id') {
+      next.contrato_id = '';
+      next.valor_aluguel = '';
+      const mes = prev.mes || getMesAtual();
+      const ano = prev.ano || getAnoAtual();
+      next.data_vencimento = calcVencimento(valor, mes, ano);
+    }
+
+    if (campo === 'contrato_id' && valor) {
+      const contrato = contratos.find(c => String(c.id) === String(valor));
+      if (contrato) {
+        next.valor_aluguel = contrato.valor || prev.valor_aluguel;
+        const mes = prev.mes || getMesAtual();
+        const ano = prev.ano || getAnoAtual();
+        next.data_vencimento = calcVencimento(contrato.imovel_id, mes, ano);
+      }
+    }
+
+    if ((campo === 'mes' || campo === 'ano') && prev.imovel_id) {
+      const mes = campo === 'mes' ? valor : prev.mes;
+      const ano = campo === 'ano' ? valor : prev.ano;
+      next.data_vencimento = calcVencimento(prev.imovel_id, mes, ano);
+    }
+
+    return next;
+  });
 
   const totalReceber = pagamentos.reduce((s, p) => s + parseFloat(p.valor_aluguel || 0), 0);
-  const totalRecebido = pagamentos.filter(p => p.status === 'pago' || p.status === 'parcial').reduce((s, p) => s + parseFloat(p.valor_recebido || 0), 0);
+  const totalRecebido = pagamentos
+    .filter(p => p.status === 'pago' || p.status === 'parcial')
+    .reduce((s, p) => {
+      if (p.status === 'pago') return s + parseFloat(p.valor_recebido || p.valor_aluguel || 0);
+      return s + parseFloat(p.valor_recebido || 0);
+    }, 0);
 
   const anos = Array.from({ length: 5 }, (_, i) => getAnoAtual() - 2 + i);
 
@@ -295,7 +344,10 @@ export default function Pagamentos() {
               <label className="form-label">Contrato</label>
               <select className="form-control" value={form.contrato_id} onChange={(e) => setF('contrato_id', e.target.value)}>
                 <option value="">Selecione...</option>
-                {contratos.map(c => <option key={c.id} value={c.id}>{c.imovel_codigo} — {c.inquilino_nome}</option>)}
+                {contratos
+                  .filter(c => !form.imovel_id || String(c.imovel_id) === String(form.imovel_id))
+                  .map(c => <option key={c.id} value={c.id}>{c.imovel_codigo} — {c.inquilino_nome}</option>)
+                }
               </select>
             </div>
           </div>
@@ -303,7 +355,7 @@ export default function Pagamentos() {
           <div className="form-grid">
             <div className="form-group">
               <label className="form-label">Valor do Aluguel <span className="required">*</span></label>
-              <input className="form-control" type="number" step="0.01" min="0" value={form.valor_aluguel} onChange={(e) => setF('valor_aluguel', e.target.value)} required />
+              <MoneyInput value={form.valor_aluguel} onChange={(v) => setF('valor_aluguel', v)} required />
             </div>
             <div className="form-group">
               <label className="form-label">Data de Vencimento <span className="required">*</span></label>
@@ -318,7 +370,7 @@ export default function Pagamentos() {
             </div>
             <div className="form-group">
               <label className="form-label">Valor Recebido</label>
-              <input className="form-control" type="number" step="0.01" min="0" value={form.valor_recebido} onChange={(e) => setF('valor_recebido', e.target.value)} />
+              <MoneyInput value={form.valor_recebido} onChange={(v) => setF('valor_recebido', v)} />
             </div>
             <div className="form-group">
               <label className="form-label">Forma de Pagamento</label>

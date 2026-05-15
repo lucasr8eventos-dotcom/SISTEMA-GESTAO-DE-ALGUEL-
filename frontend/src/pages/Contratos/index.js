@@ -3,6 +3,7 @@ import { contratosService, imoveisService, inquilinosService } from '../../servi
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
+import { MoneyInput } from '../../components/MaskedInput';
 import { formatMoeda, formatData, statusContrato, garantiaLabel } from '../../utils/format';
 
 const FORM_INICIAL = {
@@ -72,6 +73,10 @@ export default function Contratos() {
 
   const handleSalvar = async (e) => {
     e.preventDefault();
+    if (form.data_fim && form.data_inicio && form.data_fim <= form.data_inicio) {
+      toast.error('A data de fim deve ser posterior à data de início');
+      return;
+    }
     setSalvando(true);
     try {
       const fd = new FormData();
@@ -223,9 +228,14 @@ export default function Contratos() {
               <label className="form-label">Imóvel <span className="required">*</span></label>
               <select className="form-control" value={form.imovel_id} onChange={(e) => setF('imovel_id', e.target.value)} required>
                 <option value="">Selecione...</option>
-                {imoveis.map(im => (
-                  <option key={im.id} value={im.id}>{im.codigo} — {im.endereco}</option>
-                ))}
+                {imoveis.map(im => {
+                  const statusLabel = { vago: '🟢 Vago', alugado: '🔴 Alugado', negociacao: '🟡 Negociação', encerrado: '⚫ Encerrado' };
+                  return (
+                    <option key={im.id} value={im.id}>
+                      {im.codigo} — {im.endereco} [{statusLabel[im.status] || im.status}]
+                    </option>
+                  );
+                })}
               </select>
             </div>
             <div className="form-group">
@@ -253,7 +263,7 @@ export default function Contratos() {
           <div className="form-grid-3">
             <div className="form-group">
               <label className="form-label">Valor do Aluguel <span className="required">*</span></label>
-              <input className="form-control" type="number" step="0.01" min="0" value={form.valor} onChange={(e) => setF('valor', e.target.value)} required />
+              <MoneyInput value={form.valor} onChange={(v) => setF('valor', v)} required />
             </div>
             <div className="form-group">
               <label className="form-label">Garantia <span className="required">*</span></label>

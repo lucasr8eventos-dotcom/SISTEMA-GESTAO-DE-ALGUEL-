@@ -232,13 +232,13 @@ ORDER BY dias_atraso DESC;
 -- DADOS INICIAIS
 -- ============================================================
 
--- Senha: admin123
+-- Senha: admin123 (bcryptjs hash, rounds=10)
 INSERT INTO usuarios (nome, email, senha, perfil, status) VALUES
-('Administrador', 'admin@sistema.com', '$2a$10$vI8aWBnW3fID.yDY5J5Hv.XKzDQ8Y8e8dO.vFU8FqJC6WfVV9mGaS', 'admin', 'ativo');
+('Administrador', 'admin@sistema.com', '$2a$10$Mr3zId.1uxChJYHuP7zXk.rnsHpbZWl7p0WMuSSvwmZIuy6mhrGf2', 'admin', 'ativo');
 
--- Senha: oper123
+-- Senha: admin123 (mesmo hash — troque em produção)
 INSERT INTO usuarios (nome, email, senha, perfil, status) VALUES
-('Operador', 'operador@sistema.com', '$2a$10$vI8aWBnW3fID.yDY5J5Hv.XKzDQ8Y8e8dO.vFU8FqJC6WfVV9mGaS', 'operador', 'ativo');
+('Operador', 'operador@sistema.com', '$2a$10$Mr3zId.1uxChJYHuP7zXk.rnsHpbZWl7p0WMuSSvwmZIuy6mhrGf2', 'operador', 'ativo');
 
 -- Imóveis de exemplo
 INSERT INTO imoveis (codigo, tipo, endereco, valor_sem_desconto, valor_com_desconto, dia_vencimento, status, numero_iptu) VALUES

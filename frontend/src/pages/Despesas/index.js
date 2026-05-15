@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { despesasService, imoveisService } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
+import { MoneyInput } from '../../components/MaskedInput';
 import { formatMoeda, formatData, statusDespesa, tipoDespesaLabel, getMesAtual, getAnoAtual, MESES } from '../../utils/format';
 
 const FORM_INICIAL = {
@@ -25,6 +27,13 @@ export default function Despesas() {
   const [salvando, setSalvando] = useState(false);
   const toast = useToast();
   const { isAdmin } = useAuth();
+  const location = useLocation();
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const s = params.get('status');
+    if (s) setFiltroStatus(s);
+  }, [location.search]);
 
   const fetchDespesas = useCallback(async () => {
     setLoading(true);
@@ -101,6 +110,8 @@ export default function Despesas() {
 
   const totalDespesas = despesas.reduce((s, d) => s + parseFloat(d.valor || 0), 0);
   const totalPago = despesas.filter(d => d.status === 'pago').reduce((s, d) => s + parseFloat(d.valor || 0), 0);
+  const totalAtrasado = despesas.filter(d => d.status === 'atrasado').reduce((s, d) => s + parseFloat(d.valor || 0), 0);
+  const totalPendente = despesas.filter(d => d.status === 'pendente').reduce((s, d) => s + parseFloat(d.valor || 0), 0);
   const anos = Array.from({ length: 5 }, (_, i) => getAnoAtual() - 2 + i);
 
   return (
@@ -140,11 +151,12 @@ export default function Despesas() {
         </select>
       </div>
 
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
         {[
           { label: 'Total', value: formatMoeda(totalDespesas), color: 'var(--info)' },
           { label: 'Pago', value: formatMoeda(totalPago), color: 'var(--success)' },
-          { label: 'Pendente', value: formatMoeda(totalDespesas - totalPago), color: 'var(--warning)' }
+          { label: 'Pendente', value: formatMoeda(totalPendente), color: 'var(--warning)' },
+          { label: 'Atrasado', value: formatMoeda(totalAtrasado), color: 'var(--danger)' }
         ].map(item => (
           <div key={item.label} style={{ background: 'white', border: '1px solid var(--gray-200)', borderRadius: 'var(--radius)', padding: '10px 18px', borderTop: `3px solid ${item.color}` }}>
             <div style={{ fontSize: 18, fontWeight: 700, color: item.color }}>{item.value}</div>
@@ -250,7 +262,7 @@ export default function Despesas() {
           <div className="form-grid">
             <div className="form-group">
               <label className="form-label">Valor <span className="required">*</span></label>
-              <input className="form-control" type="number" step="0.01" min="0" value={form.valor} onChange={(e) => setF('valor', e.target.value)} required />
+              <MoneyInput value={form.valor} onChange={(v) => setF('valor', v)} required />
             </div>
             <div className="form-group">
               <label className="form-label">Vencimento <span className="required">*</span></label>

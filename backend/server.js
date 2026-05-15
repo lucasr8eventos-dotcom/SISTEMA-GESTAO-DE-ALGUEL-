@@ -335,7 +335,11 @@ app.post('/api/inquilinos', authenticateToken, [
   try {
     const { nome, cpf_cnpj, telefone, email, endereco, observacoes } = req.body;
 
-    const existe = await pool.query('SELECT id FROM inquilinos WHERE cpf_cnpj=$1', [cpf_cnpj]);
+    const cpfDigits = cpf_cnpj.replace(/\D/g, '');
+    const existe = await pool.query(
+      "SELECT id FROM inquilinos WHERE REGEXP_REPLACE(cpf_cnpj, '[^0-9]', '', 'g') = $1",
+      [cpfDigits]
+    );
     if (existe.rows.length > 0) {
       return res.status(400).json({ error: 'CPF/CNPJ já cadastrado' });
     }
@@ -382,11 +386,16 @@ app.delete('/api/inquilinos/:id', authenticateToken, authorizeAdmin, [
   try {
     const { id } = req.params;
 
-    const contratos = await pool.query(
+    const contratosAtivos = await pool.query(
       "SELECT id FROM contratos WHERE inquilino_id=$1 AND status='ativo'", [id]
     );
-    if (contratos.rows.length > 0) {
+    if (contratosAtivos.rows.length > 0) {
       return res.status(400).json({ error: 'Inquilino possui contratos ativos. Encerre os contratos antes de excluir.' });
+    }
+
+    const todosContratos = await pool.query('SELECT id FROM contratos WHERE inquilino_id=$1', [id]);
+    if (todosContratos.rows.length > 0) {
+      return res.status(400).json({ error: 'Inquilino possui contratos vinculados. Exclua os contratos antes de excluir o inquilino.' });
     }
 
     const result = await pool.query('DELETE FROM inquilinos WHERE id=$1 RETURNING id', [id]);
@@ -522,6 +531,16 @@ app.delete('/api/imoveis/:id', authenticateToken, authorizeAdmin, [
       return res.status(400).json({ error: 'Imóvel possui contratos ativos. Encerre os contratos antes de excluir.' });
     }
 
+    const todosContratos = await pool.query('SELECT id FROM contratos WHERE imovel_id=$1', [id]);
+    if (todosContratos.rows.length > 0) {
+      return res.status(400).json({ error: 'Imóvel possui contratos vinculados. Exclua os contratos antes de excluir o imóvel.' });
+    }
+
+    const pagamentos = await pool.query('SELECT id FROM pagamentos WHERE imovel_id=$1', [id]);
+    if (pagamentos.rows.length > 0) {
+      return res.status(400).json({ error: 'Imóvel possui pagamentos registrados e não pode ser excluído.' });
+    }
+
     const result = await pool.query('DELETE FROM imoveis WHERE id=$1 RETURNING id', [id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Imóvel não encontrado' });
 
@@ -620,6 +639,15 @@ app.post('/api/contratos', authenticateToken, upload.single('arquivo_pdf'), [
     const { imovel_id, inquilino_id, data_inicio, data_fim, valor, garantia, status, observacoes } = req.body;
     const arquivo_pdf = req.file ? req.file.filename : null;
 
+    if (status === 'ativo') {
+      const contratoAtivo = await pool.query(
+        "SELECT id FROM contratos WHERE imovel_id=$1 AND status='ativo'", [imovel_id]
+      );
+      if (contratoAtivo.rows.length > 0) {
+        return res.status(400).json({ error: 'Este imóvel já possui um contrato ativo. Encerre o contrato atual antes de criar um novo.' });
+      }
+    }
+
     const result = await pool.query(
       `INSERT INTO contratos (imovel_id, inquilino_id, data_inicio, data_fim, valor, garantia, status, arquivo_pdf, observacoes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
@@ -656,12 +684,41 @@ app.put('/api/contratos/:id', authenticateToken, upload.single('arquivo_pdf'), [
 
     const arquivo_pdf = req.file ? req.file.filename : contrato.rows[0].arquivo_pdf;
 
+    const contratoAntes = contrato.rows[0];
+
     const result = await pool.query(
       `UPDATE contratos SET imovel_id=$1, inquilino_id=$2, data_inicio=$3, data_fim=$4,
         valor=$5, garantia=$6, status=$7, arquivo_pdf=$8, observacoes=$9, updated_at=NOW()
        WHERE id=$10 RETURNING *`,
       [imovel_id, inquilino_id, data_inicio, data_fim, valor, garantia, status, arquivo_pdf, observacoes, id]
     );
+
+    // Se o imóvel mudou, libera o imóvel anterior
+    const imovelChanged = String(contratoAntes.imovel_id) !== String(imovel_id);
+    if (imovelChanged && contratoAntes.status === 'ativo') {
+      const outrosAtivosAntigo = await pool.query(
+        "SELECT id FROM contratos WHERE imovel_id=$1 AND status='ativo' AND id<>$2",
+        [contratoAntes.imovel_id, id]
+      );
+      if (outrosAtivosAntigo.rows.length === 0) {
+        await pool.query("UPDATE imoveis SET status='vago' WHERE id=$1", [contratoAntes.imovel_id]);
+      }
+    }
+
+    // Sincroniza status do imóvel quando o status do contrato muda
+    if (contratoAntes.status !== status || imovelChanged) {
+      if (status === 'ativo') {
+        await pool.query("UPDATE imoveis SET status='alugado' WHERE id=$1", [imovel_id]);
+      } else if (status === 'encerrado' || status === 'vencido') {
+        const outrosAtivos = await pool.query(
+          "SELECT id FROM contratos WHERE imovel_id=$1 AND status='ativo' AND id<>$2",
+          [imovel_id, id]
+        );
+        if (outrosAtivos.rows.length === 0) {
+          await pool.query("UPDATE imoveis SET status='vago' WHERE id=$1", [imovel_id]);
+        }
+      }
+    }
 
     await logAtividade(req.user.id, 'editar_contrato', 'contratos', parseInt(id), null, req.ip);
     res.json(result.rows[0]);
@@ -675,8 +732,22 @@ app.delete('/api/contratos/:id', authenticateToken, authorizeAdmin, [
 ], validate, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('DELETE FROM contratos WHERE id=$1 RETURNING id', [id]);
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Contrato não encontrado' });
+
+    const contratoRes = await pool.query('SELECT id, imovel_id, status FROM contratos WHERE id=$1', [id]);
+    if (contratoRes.rows.length === 0) return res.status(404).json({ error: 'Contrato não encontrado' });
+    const contrato = contratoRes.rows[0];
+
+    await pool.query('DELETE FROM contratos WHERE id=$1', [id]);
+
+    if (contrato.status === 'ativo') {
+      const outrosAtivos = await pool.query(
+        "SELECT id FROM contratos WHERE imovel_id=$1 AND status='ativo'",
+        [contrato.imovel_id]
+      );
+      if (outrosAtivos.rows.length === 0) {
+        await pool.query("UPDATE imoveis SET status='vago' WHERE id=$1", [contrato.imovel_id]);
+      }
+    }
 
     await logAtividade(req.user.id, 'excluir_contrato', 'contratos', parseInt(id), null, req.ip);
     res.json({ message: 'Contrato excluído com sucesso' });
@@ -735,6 +806,14 @@ app.post('/api/pagamentos', authenticateToken, [
       mes, ano, imovel_id, contrato_id, valor_aluguel, data_vencimento,
       data_pagamento, valor_recebido, forma_pagamento, status, observacoes
     } = req.body;
+
+    const duplicado = await pool.query(
+      'SELECT id FROM pagamentos WHERE mes=$1 AND ano=$2 AND imovel_id=$3',
+      [mes, ano, imovel_id]
+    );
+    if (duplicado.rows.length > 0) {
+      return res.status(400).json({ error: `Já existe um pagamento registrado para este imóvel em ${mes}/${ano}. Edite o registro existente.` });
+    }
 
     const result = await pool.query(
       `INSERT INTO pagamentos (mes, ano, imovel_id, contrato_id, valor_aluguel, data_vencimento,
@@ -1128,7 +1207,7 @@ app.get('/api/dashboard/evolucao', authenticateToken, async (req, res) => {
         SUM(valor_aluguel) as total_receber,
         SUM(CASE WHEN status IN ('pago','parcial') THEN COALESCE(valor_recebido,0) ELSE 0 END) as total_recebido
       FROM pagamentos
-      WHERE (ano * 100 + mes) >= ((EXTRACT(YEAR FROM NOW()) * 100 + EXTRACT(MONTH FROM NOW())) - 5)
+      WHERE (ano * 12 + mes) >= ((EXTRACT(YEAR FROM NOW())::int * 12 + EXTRACT(MONTH FROM NOW())::int) - 5)
       GROUP BY mes, ano
       ORDER BY ano, mes
     `);
