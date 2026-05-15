@@ -5,7 +5,7 @@ import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
 import { MoneyInput } from '../../components/MaskedInput';
-import { formatMoeda, statusImovel, tipoImovel } from '../../utils/format';
+import { formatMoeda, formatData, statusImovel, tipoImovel } from '../../utils/format';
 
 const FORM_INICIAL = {
   codigo: '', tipo: 'apartamento', endereco: '', valor_sem_desconto: '', valor_com_desconto: '',
@@ -80,9 +80,9 @@ export default function Imoveis() {
   const handleSalvar = async (e) => {
     e.preventDefault();
     if (
-      f.valor_com_desconto &&
-      f.valor_sem_desconto &&
-      parseFloat(f.valor_com_desconto) > parseFloat(f.valor_sem_desconto)
+      form.valor_com_desconto &&
+      form.valor_sem_desconto &&
+      parseFloat(form.valor_com_desconto) > parseFloat(form.valor_sem_desconto)
     ) {
       toast.error('O valor com desconto não pode ser maior que o valor sem desconto');
       return;
@@ -333,8 +333,8 @@ export default function Imoveis() {
                     <td>{p.mes}/{p.ano}</td>
                     <td>{p.inquilino_nome || '—'}</td>
                     <td>{formatMoeda(p.valor_aluguel)}</td>
-                    <td>{p.data_vencimento ? new Date(p.data_vencimento).toLocaleDateString('pt-BR') : '—'}</td>
-                    <td>{p.data_pagamento ? new Date(p.data_pagamento).toLocaleDateString('pt-BR') : '—'}</td>
+                    <td>{formatData(p.data_vencimento)}</td>
+                    <td>{formatData(p.data_pagamento)}</td>
                     <td>
                       <span className={`badge badge-${p.status === 'pago' ? 'success' : p.status === 'atrasado' ? 'danger' : p.status === 'parcial' ? 'info' : 'warning'}`}>
                         {p.status}

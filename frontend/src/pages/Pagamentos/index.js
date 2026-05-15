@@ -133,35 +133,38 @@ export default function Pagamentos() {
     }
   };
 
+  const calcVencimento = (imovelId, mes, ano) => {
+    const imovel = imoveis.find(im => String(im.id) === String(imovelId));
+    if (!imovel || !imovel.dia_vencimento) return '';
+    const dia = Math.min(imovel.dia_vencimento, new Date(ano, mes, 0).getDate());
+    return `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+  };
+
   const setF = (campo, valor) => setForm(prev => {
     const next = { ...prev, [campo]: valor };
 
     if (campo === 'imovel_id') {
       next.contrato_id = '';
       next.valor_aluguel = '';
-      next.data_vencimento = '';
-      const imovel = imoveis.find(im => String(im.id) === String(valor));
-      if (imovel && imovel.dia_vencimento) {
-        const hoje = new Date();
-        const mes = prev.mes || getMesAtual();
-        const ano = prev.ano || getAnoAtual();
-        const dia = Math.min(imovel.dia_vencimento, new Date(ano, mes, 0).getDate());
-        next.data_vencimento = `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
-      }
+      const mes = prev.mes || getMesAtual();
+      const ano = prev.ano || getAnoAtual();
+      next.data_vencimento = calcVencimento(valor, mes, ano);
     }
 
     if (campo === 'contrato_id' && valor) {
       const contrato = contratos.find(c => String(c.id) === String(valor));
       if (contrato) {
         next.valor_aluguel = contrato.valor || prev.valor_aluguel;
-        const imovel = imoveis.find(im => String(im.id) === String(contrato.imovel_id));
-        if (imovel && imovel.dia_vencimento) {
-          const mes = prev.mes || getMesAtual();
-          const ano = prev.ano || getAnoAtual();
-          const dia = Math.min(imovel.dia_vencimento, new Date(ano, mes, 0).getDate());
-          next.data_vencimento = `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
-        }
+        const mes = prev.mes || getMesAtual();
+        const ano = prev.ano || getAnoAtual();
+        next.data_vencimento = calcVencimento(contrato.imovel_id, mes, ano);
       }
+    }
+
+    if ((campo === 'mes' || campo === 'ano') && prev.imovel_id) {
+      const mes = campo === 'mes' ? valor : prev.mes;
+      const ano = campo === 'ano' ? valor : prev.ano;
+      next.data_vencimento = calcVencimento(prev.imovel_id, mes, ano);
     }
 
     return next;

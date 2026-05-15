@@ -223,7 +223,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {(stats.alertas.contratosVencendo7Dias > 0 || stats.alertas.reajustesUrgentes > 0 || stats.alertas.despesasAtrasadas > 0 || stats.alugueisAtrasados > 0) && (
+      {((stats.alertas?.contratosVencendo7Dias > 0) || (stats.alertas?.reajustesUrgentes > 0) || (stats.alertas?.despesasAtrasadas > 0) || stats.alugueisAtrasados > 0) && (
         <div>
           <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12, color: 'var(--gray-700)' }}>
             ⚠️ Alertas
@@ -239,7 +239,7 @@ export default function Dashboard() {
                 onClick={() => navigate('/pagamentos?status=atrasado')}
               />
             )}
-            {stats.alertas.contratosVencendo7Dias > 0 && (
+            {stats.alertas?.contratosVencendo7Dias > 0 && (
               <AlertCard
                 icon="📋"
                 title="Contratos Vencendo"
@@ -249,7 +249,7 @@ export default function Dashboard() {
                 onClick={() => navigate('/contratos')}
               />
             )}
-            {stats.alertas.reajustesUrgentes > 0 && (
+            {stats.alertas?.reajustesUrgentes > 0 && (
               <AlertCard
                 icon="📈"
                 title="Reajustes Urgentes"
@@ -259,7 +259,7 @@ export default function Dashboard() {
                 onClick={() => navigate('/reajustes')}
               />
             )}
-            {stats.alertas.despesasAtrasadas > 0 && (
+            {stats.alertas?.despesasAtrasadas > 0 && (
               <AlertCard
                 icon="📄"
                 title="Despesas Atrasadas"
