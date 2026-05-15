@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
 import { MoneyInput } from '../../components/MaskedInput';
 import { formatMoeda, formatData, statusContrato, garantiaLabel } from '../../utils/format';
+import Pagination, { PER_PAGE } from '../../components/Pagination';
 
 const FORM_INICIAL = {
   imovel_id: '', inquilino_id: '', data_inicio: '', data_fim: '',
@@ -22,6 +23,7 @@ export default function Contratos() {
   const [form, setForm] = useState(FORM_INICIAL);
   const [editando, setEditando] = useState(null);
   const [salvando, setSalvando] = useState(false);
+  const [page, setPage] = useState(1);
   const toast = useToast();
   const { isAdmin } = useAuth();
 
@@ -38,6 +40,8 @@ export default function Contratos() {
   }, [filtroStatus]);
 
   useEffect(() => { fetchContratos(); }, [fetchContratos]);
+
+  useEffect(() => { setPage(1); }, [filtroStatus]);
 
   useEffect(() => {
     Promise.all([
@@ -113,6 +117,8 @@ export default function Contratos() {
 
   const setF = (campo, valor) => setForm(prev => ({ ...prev, [campo]: valor }));
 
+  const paginatedContratos = contratos.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+
   const getAlertaVencimento = (dias) => {
     if (dias <= 0) return <span className="badge badge-danger">Vencido</span>;
     if (dias <= 7) return <span className="badge badge-danger">Vence em {dias}d</span>;
@@ -164,7 +170,7 @@ export default function Contratos() {
                 </tr>
               </thead>
               <tbody>
-                {contratos.map((c) => {
+                {paginatedContratos.map((c) => {
                   const st = statusContrato(c.status);
                   return (
                     <tr key={c.id}>
@@ -206,6 +212,7 @@ export default function Contratos() {
             </table>
           )}
         </div>
+        <Pagination total={contratos.length} page={page} perPage={PER_PAGE} onChange={setPage} />
       </div>
 
       <Modal

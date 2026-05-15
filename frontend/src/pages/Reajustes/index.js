@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
 import { MoneyInput } from '../../components/MaskedInput';
 import { formatMoeda, formatData, statusReajuste } from '../../utils/format';
+import Pagination, { PER_PAGE } from '../../components/Pagination';
 
 const FORM_INICIAL = {
   imovel_id: '', contrato_id: '', valor_atual: '', data_ultimo: '', data_proximo: '',
@@ -22,6 +23,7 @@ export default function Reajustes() {
   const [form, setForm] = useState(FORM_INICIAL);
   const [editando, setEditando] = useState(null);
   const [salvando, setSalvando] = useState(false);
+  const [page, setPage] = useState(1);
   const toast = useToast();
   const { isAdmin } = useAuth();
 
@@ -38,6 +40,8 @@ export default function Reajustes() {
   }, [filtroStatus]);
 
   useEffect(() => { fetchReajustes(); }, [fetchReajustes]);
+
+  useEffect(() => { setPage(1); }, [filtroStatus]);
 
   useEffect(() => {
     Promise.all([imoveisService.listar(), contratosService.listar({ status: 'ativo' })])
@@ -104,6 +108,8 @@ export default function Reajustes() {
     }
   };
 
+  const paginatedReajustes = reajustes.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+
   const setF = (campo, valor) => {
     setForm(prev => {
       const next = { ...prev, [campo]: valor };
@@ -161,7 +167,7 @@ export default function Reajustes() {
                 </tr>
               </thead>
               <tbody>
-                {reajustes.map((r) => {
+                {paginatedReajustes.map((r) => {
                   const st = statusReajuste(r.status);
                   const diasRestantes = r.data_proximo
                     ? Math.ceil((new Date(r.data_proximo) - new Date()) / 86400000)
@@ -208,6 +214,7 @@ export default function Reajustes() {
             </table>
           )}
         </div>
+        <Pagination total={reajustes.length} page={page} perPage={PER_PAGE} onChange={setPage} />
       </div>
 
       <Modal

@@ -42,7 +42,7 @@ const adminItems = [
   }
 ];
 
-export default function Sidebar({ collapsed, onCollapse }) {
+export default function Sidebar({ collapsed, mobileOpen, onCollapse }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { isAdmin, usuario, logout } = useAuth();
@@ -55,7 +55,7 @@ export default function Sidebar({ collapsed, onCollapse }) {
   };
 
   return (
-    <aside className={`sidebar${collapsed ? ' collapsed' : ''}`}>
+    <aside className={`sidebar${collapsed ? ' collapsed' : ''}${mobileOpen ? ' open' : ''}`}>
       <div className="sidebar-logo">
         <div className="logo-icon">🏢</div>
         <span className="logo-text">GestãoAluguel</span>

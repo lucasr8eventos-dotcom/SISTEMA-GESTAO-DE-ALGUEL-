@@ -6,6 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
 import { MoneyInput } from '../../components/MaskedInput';
 import { formatMoeda, formatData, statusImovel, tipoImovel } from '../../utils/format';
+import Pagination, { PER_PAGE } from '../../components/Pagination';
 
 const FORM_INICIAL = {
   codigo: '', tipo: 'apartamento', endereco: '', valor_sem_desconto: '', valor_com_desconto: '',
@@ -23,6 +24,7 @@ export default function Imoveis() {
   const [form, setForm] = useState(FORM_INICIAL);
   const [editando, setEditando] = useState(null);
   const [salvando, setSalvando] = useState(false);
+  const [page, setPage] = useState(1);
   const [historicoModal, setHistoricoModal] = useState(null);
   const [historico, setHistorico] = useState([]);
   const toast = useToast();
@@ -51,6 +53,8 @@ export default function Imoveis() {
     const t = setTimeout(fetchImoveis, 300);
     return () => clearTimeout(t);
   }, [fetchImoveis]);
+
+  useEffect(() => { setPage(1); }, [busca, filtroStatus]);
 
   const abrirNovo = () => {
     setEditando(null);
@@ -129,6 +133,8 @@ export default function Imoveis() {
   const f = form;
   const setF = (campo, valor) => setForm(prev => ({ ...prev, [campo]: valor }));
 
+  const paginatedImoveis = imoveis.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+
   return (
     <div>
       <div className="page-header">
@@ -185,7 +191,7 @@ export default function Imoveis() {
                 </tr>
               </thead>
               <tbody>
-                {imoveis.map((im) => {
+                {paginatedImoveis.map((im) => {
                   const st = statusImovel(im.status);
                   return (
                     <tr key={im.id}>
@@ -212,6 +218,7 @@ export default function Imoveis() {
             </table>
           )}
         </div>
+        <Pagination total={imoveis.length} page={page} perPage={PER_PAGE} onChange={setPage} />
       </div>
 
       {/* Modal Formulário */}

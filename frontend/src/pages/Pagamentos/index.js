@@ -5,6 +5,7 @@ import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
 import { MoneyInput } from '../../components/MaskedInput';
+import Pagination, { PER_PAGE } from '../../components/Pagination';
 import { formatMoeda, formatData, getMesAtual, getAnoAtual, MESES, formaPagamentoLabel } from '../../utils/format';
 
 const FORM_INICIAL = {
@@ -33,6 +34,7 @@ export default function Pagamentos() {
   const [form, setForm] = useState(FORM_INICIAL);
   const [editando, setEditando] = useState(null);
   const [salvando, setSalvando] = useState(false);
+  const [page, setPage] = useState(1);
   const toast = useToast();
   const { isAdmin } = useAuth();
   const location = useLocation();
@@ -64,6 +66,8 @@ export default function Pagamentos() {
     const t = setTimeout(fetchPagamentos, 300);
     return () => clearTimeout(t);
   }, [fetchPagamentos]);
+
+  useEffect(() => { setPage(1); }, [filtroMes, filtroAno, filtroStatus, busca]);
 
   useEffect(() => {
     Promise.all([imoveisService.listar(), contratosService.listar({ status: 'ativo' })])
@@ -133,6 +137,19 @@ export default function Pagamentos() {
     }
   };
 
+  const handleRecibosLote = async () => {
+    if (!filtroMes || !filtroAno) {
+      toast.error('Selecione mês e ano para gerar os recibos');
+      return;
+    }
+    try {
+      const res = await pagamentosService.recibosLote({ mes: filtroMes, ano: filtroAno });
+      downloadBlob(res.data, `recibos-${filtroMes}-${filtroAno}.pdf`);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erro ao gerar recibos');
+    }
+  };
+
   const calcVencimento = (imovelId, mes, ano) => {
     const imovel = imoveis.find(im => String(im.id) === String(imovelId));
     if (!imovel || !imovel.dia_vencimento) return '';
@@ -170,6 +187,7 @@ export default function Pagamentos() {
     return next;
   });
 
+  const paginatedPagamentos = pagamentos.slice((page - 1) * PER_PAGE, page * PER_PAGE);
   const totalReceber = pagamentos.reduce((s, p) => s + parseFloat(p.valor_aluguel || 0), 0);
   const totalRecebido = pagamentos
     .filter(p => p.status === 'pago' || p.status === 'parcial')
@@ -194,7 +212,10 @@ export default function Pagamentos() {
           <h1>Pagamentos</h1>
           <p>Controle mensal de aluguéis</p>
         </div>
-        <button className="btn btn-primary" onClick={abrirNovo}>+ Registrar Pagamento</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-ghost" onClick={handleRecibosLote} title="Gerar PDF de todos os recibos pagos do mês">🧾 Recibos do Mês</button>
+          <button className="btn btn-primary" onClick={abrirNovo}>+ Registrar Pagamento</button>
+        </div>
       </div>
 
       <div className="filters-row">
@@ -260,7 +281,7 @@ export default function Pagamentos() {
                 </tr>
               </thead>
               <tbody>
-                {pagamentos.map((p) => (
+                {paginatedPagamentos.map((p) => (
                   <tr key={p.id} style={rowStyle(p.status)}>
                     <td>{p.mes}/{p.ano}</td>
                     <td>
@@ -291,6 +312,7 @@ export default function Pagamentos() {
             </table>
           )}
         </div>
+        <Pagination total={pagamentos.length} page={page} perPage={PER_PAGE} onChange={setPage} />
       </div>
 
       <Modal
