@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { authService } from '../services/api';
 
 const AuthContext = createContext(null);
@@ -8,6 +8,20 @@ export const AuthProvider = ({ children }) => {
     try { return JSON.parse(localStorage.getItem('usuario')); } catch { return null; }
   });
   const [loading, setLoading] = useState(true);
+
+  const logout = useCallback(() => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('usuario');
+    setUsuario(null);
+  }, []);
+
+  const login = useCallback(async (email, senha) => {
+    const res = await authService.login(email, senha);
+    localStorage.setItem('token', res.data.token);
+    localStorage.setItem('usuario', JSON.stringify(res.data.usuario));
+    setUsuario(res.data.usuario);
+    return res.data;
+  }, []);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -21,27 +35,19 @@ export const AuthProvider = ({ children }) => {
     } else {
       setLoading(false);
     }
-  }, []);
+  }, [logout]);
 
-  const login = useCallback(async (email, senha) => {
-    const res = await authService.login(email, senha);
-    localStorage.setItem('token', res.data.token);
-    localStorage.setItem('usuario', JSON.stringify(res.data.usuario));
-    setUsuario(res.data.usuario);
-    return res.data;
-  }, []);
-
-  const logout = useCallback(() => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('usuario');
-    setUsuario(null);
-  }, []);
-
-  const isAdmin = usuario?.perfil === 'admin';
-  const isOperador = usuario?.perfil === 'operador';
+  const value = useMemo(() => ({
+    usuario,
+    login,
+    logout,
+    isAdmin: usuario?.perfil === 'admin',
+    isOperador: usuario?.perfil === 'operador',
+    loading
+  }), [usuario, login, logout, loading]);
 
   return (
-    <AuthContext.Provider value={{ usuario, login, logout, isAdmin, isOperador, loading }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );
