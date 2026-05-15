@@ -117,15 +117,14 @@ app.use('/uploads', (req, res, next) => {
 // AUTENTICAÇÃO E AUTORIZAÇÃO
 // ============================================================
 
-const JWT_SECRET = process.env.JWT_SECRET;
-if (!JWT_SECRET || JWT_SECRET.length < 32) {
-  if (process.env.NODE_ENV === 'production') {
-    console.error('FATAL: JWT_SECRET não definido ou muito curto. Encerrando em produção.');
-    process.exit(1);
-  } else {
-    console.warn('⚠️  JWT_SECRET não definido ou muito curto. Configure antes de ir para produção!');
-  }
-}
+const crypto = require('crypto');
+const JWT_SECRET = (process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32)
+  ? process.env.JWT_SECRET
+  : (() => {
+      const generated = crypto.randomBytes(32).toString('hex');
+      console.warn('⚠️  JWT_SECRET não definido ou muito curto. Usando secret gerado automaticamente. Defina JWT_SECRET no Railway para persistência entre reinícios.');
+      return generated;
+    })();
 
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
