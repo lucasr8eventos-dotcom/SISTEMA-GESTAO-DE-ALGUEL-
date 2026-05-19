@@ -6,6 +6,7 @@ import Modal, { ConfirmDialog } from '../../components/Modal';
 import { MoneyInput } from '../../components/MaskedInput';
 import { formatMoeda, formatData, statusContrato, garantiaLabel } from '../../utils/format';
 import Pagination, { PER_PAGE } from '../../components/Pagination';
+import { Pencil, Trash2, Paperclip, FileText } from 'lucide-react';
 
 const FORM_INICIAL = {
   imovel_id: '', inquilino_id: '', data_inicio: '', data_fim: '',
@@ -151,7 +152,7 @@ export default function Contratos() {
             <div className="loading-spinner"><div className="spinner" /></div>
           ) : contratos.length === 0 ? (
             <div className="empty-state">
-              <div className="empty-icon">📋</div>
+              <div className="empty-icon"><FileText size={48} /></div>
               <h3>Nenhum contrato encontrado</h3>
             </div>
           ) : (
@@ -197,11 +198,11 @@ export default function Contratos() {
                               rel="noreferrer"
                               className="btn btn-ghost btn-sm btn-icon"
                               title="Ver PDF"
-                            >📎</a>
+                            ><Paperclip size={14} /></a>
                           )}
-                          <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => abrirEditar(c)}>✏️</button>
+                          <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => abrirEditar(c)}><Pencil size={14} /></button>
                           {isAdmin && (
-                            <button className="btn btn-outline-danger btn-sm btn-icon" title="Excluir" onClick={() => setConfirmExcluir(c)}>🗑</button>
+                            <button className="btn btn-outline-danger btn-sm btn-icon" title="Excluir" onClick={() => setConfirmExcluir(c)}><Trash2 size={14} /></button>
                           )}
                         </div>
                       </td>
@@ -224,7 +225,7 @@ export default function Contratos() {
           <>
             <button className="btn btn-ghost" onClick={() => setModalAberto(false)}>Cancelar</button>
             <button className="btn btn-primary" onClick={handleSalvar} disabled={salvando}>
-              {salvando ? '⏳ Salvando...' : '💾 Salvar'}
+              {salvando ? 'Salvando...' : 'Salvar'}
             </button>
           </>
         }

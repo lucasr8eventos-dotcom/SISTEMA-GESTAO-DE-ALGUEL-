@@ -7,6 +7,7 @@ import { CpfCnpjInput, PhoneInput } from '../../components/MaskedInput';
 import { formatCpfCnpj, formatTelefone } from '../../utils/format';
 import { maskCpfCnpj, maskPhone } from '../../utils/masks';
 import Pagination, { PER_PAGE } from '../../components/Pagination';
+import { Pencil, Trash2, Search, Users } from 'lucide-react';
 
 const FORM_INICIAL = { nome: '', cpf_cnpj: '', telefone: '', email: '', endereco: '', observacoes: '' };
 
@@ -108,7 +109,7 @@ export default function Inquilinos() {
 
       <div className="filters-row">
         <div className="search-input-wrap">
-          <span className="search-icon">🔍</span>
+          <span className="search-icon"><Search size={16} /></span>
           <input
             className="form-control"
             placeholder="Buscar por nome, CPF/CNPJ ou e-mail..."
@@ -124,7 +125,7 @@ export default function Inquilinos() {
             <div className="loading-spinner"><div className="spinner" /></div>
           ) : inquilinos.length === 0 ? (
             <div className="empty-state">
-              <div className="empty-icon">👤</div>
+              <div className="empty-icon"><Users size={48} /></div>
               <h3>Nenhum inquilino encontrado</h3>
               <p>Cadastre um novo inquilino para começar</p>
             </div>
@@ -150,9 +151,9 @@ export default function Inquilinos() {
                     <td style={{ maxWidth: 200 }}>{inq.endereco || '—'}</td>
                     <td>
                       <div className="table-actions">
-                        <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => abrirEditar(inq)}>✏️</button>
+                        <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => abrirEditar(inq)}><Pencil size={14} /></button>
                         {isAdmin && (
-                          <button className="btn btn-outline-danger btn-sm btn-icon" title="Excluir" onClick={() => setConfirmExcluir(inq)}>🗑</button>
+                          <button className="btn btn-outline-danger btn-sm btn-icon" title="Excluir" onClick={() => setConfirmExcluir(inq)}><Trash2 size={14} /></button>
                         )}
                       </div>
                     </td>
@@ -173,7 +174,7 @@ export default function Inquilinos() {
           <>
             <button className="btn btn-ghost" onClick={() => setModalAberto(false)}>Cancelar</button>
             <button className="btn btn-primary" onClick={handleSalvar} disabled={salvando}>
-              {salvando ? '⏳ Salvando...' : '💾 Salvar'}
+              {salvando ? 'Salvando...' : 'Salvar'}
             </button>
           </>
         }

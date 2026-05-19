@@ -7,6 +7,7 @@ import Modal, { ConfirmDialog } from '../../components/Modal';
 import { MoneyInput } from '../../components/MaskedInput';
 import Pagination, { PER_PAGE } from '../../components/Pagination';
 import { formatMoeda, formatData, getMesAtual, getAnoAtual, MESES, formaPagamentoLabel } from '../../utils/format';
+import { Pencil, Trash2, Search, FileText, Banknote } from 'lucide-react';
 
 const FORM_INICIAL = {
   mes: getMesAtual(), ano: getAnoAtual(), imovel_id: '', contrato_id: '',
@@ -213,7 +214,7 @@ export default function Pagamentos() {
           <p>Controle mensal de aluguéis</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-ghost" onClick={handleRecibosLote} title="Gerar PDF de todos os recibos pagos do mês">🧾 Recibos do Mês</button>
+          <button className="btn btn-ghost" onClick={handleRecibosLote} title="Gerar PDF de todos os recibos pagos do mês">Recibos do Mês</button>
           <button className="btn btn-primary" onClick={abrirNovo}>+ Registrar Pagamento</button>
         </div>
       </div>
@@ -235,7 +236,7 @@ export default function Pagamentos() {
           <option value="parcial">Parcial</option>
         </select>
         <div className="search-input-wrap">
-          <span className="search-icon">🔍</span>
+          <span className="search-icon"><Search size={16} /></span>
           <input className="form-control" placeholder="Buscar imóvel ou inquilino..." value={busca} onChange={(e) => setBusca(e.target.value)} />
         </div>
       </div>
@@ -261,7 +262,7 @@ export default function Pagamentos() {
             <div className="loading-spinner"><div className="spinner" /></div>
           ) : pagamentos.length === 0 ? (
             <div className="empty-state">
-              <div className="empty-icon">💰</div>
+              <div className="empty-icon"><Banknote size={48} /></div>
               <h3>Nenhum pagamento encontrado</h3>
             </div>
           ) : (
@@ -298,11 +299,11 @@ export default function Pagamentos() {
                     <td>
                       <div className="table-actions">
                         {p.status === 'pago' && (
-                          <button className="btn btn-ghost btn-sm btn-icon" title="Gerar Recibo" onClick={() => handleRecibo(p.id)}>🧾</button>
+                          <button className="btn btn-ghost btn-sm btn-icon" title="Gerar Recibo" onClick={() => handleRecibo(p.id)}><FileText size={14} /></button>
                         )}
-                        <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => abrirEditar(p)}>✏️</button>
+                        <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => abrirEditar(p)}><Pencil size={14} /></button>
                         {isAdmin && (
-                          <button className="btn btn-outline-danger btn-sm btn-icon" title="Excluir" onClick={() => setConfirmExcluir(p)}>🗑</button>
+                          <button className="btn btn-outline-danger btn-sm btn-icon" title="Excluir" onClick={() => setConfirmExcluir(p)}><Trash2 size={14} /></button>
                         )}
                       </div>
                     </td>
@@ -324,7 +325,7 @@ export default function Pagamentos() {
           <>
             <button className="btn btn-ghost" onClick={() => setModalAberto(false)}>Cancelar</button>
             <button className="btn btn-primary" onClick={handleSalvar} disabled={salvando}>
-              {salvando ? '⏳ Salvando...' : '💾 Salvar'}
+              {salvando ? 'Salvando...' : 'Salvar'}
             </button>
           </>
         }

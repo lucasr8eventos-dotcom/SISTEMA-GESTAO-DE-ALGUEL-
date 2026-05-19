@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { Menu } from 'lucide-react';
 
 export default function Topbar({ title, subtitle, collapsed, onToggleSidebar }) {
   const { usuario } = useAuth();
@@ -16,7 +17,7 @@ export default function Topbar({ title, subtitle, collapsed, onToggleSidebar }) 
           onClick={onToggleSidebar}
           title="Expandir/Recolher menu"
         >
-          ☰
+          <Menu size={20} />
         </button>
         <div>
           <div className="topbar-title">{title}</div>

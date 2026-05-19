@@ -6,6 +6,7 @@ import Modal, { ConfirmDialog } from '../../components/Modal';
 import { MoneyInput } from '../../components/MaskedInput';
 import { formatMoeda, formatData, statusReajuste } from '../../utils/format';
 import Pagination, { PER_PAGE } from '../../components/Pagination';
+import { Pencil, Trash2, TrendingUp } from 'lucide-react';
 
 const FORM_INICIAL = {
   imovel_id: '', contrato_id: '', valor_atual: '', data_ultimo: '', data_proximo: '',
@@ -148,7 +149,7 @@ export default function Reajustes() {
             <div className="loading-spinner"><div className="spinner" /></div>
           ) : reajustes.length === 0 ? (
             <div className="empty-state">
-              <div className="empty-icon">📈</div>
+              <div className="empty-icon"><TrendingUp size={48} /></div>
               <h3>Nenhum reajuste encontrado</h3>
             </div>
           ) : (
@@ -203,8 +204,8 @@ export default function Reajustes() {
                       <td><span className={`badge ${st.className}`}>{st.label}</span></td>
                       <td>
                         <div className="table-actions">
-                          <button className="btn btn-ghost btn-sm btn-icon" onClick={() => abrirEditar(r)}>✏️</button>
-                          {isAdmin && <button className="btn btn-outline-danger btn-sm btn-icon" onClick={() => setConfirmExcluir(r)}>🗑</button>}
+                          <button className="btn btn-ghost btn-sm btn-icon" onClick={() => abrirEditar(r)}><Pencil size={14} /></button>
+                          {isAdmin && <button className="btn btn-outline-danger btn-sm btn-icon" onClick={() => setConfirmExcluir(r)}><Trash2 size={14} /></button>}
                         </div>
                       </td>
                     </tr>
@@ -226,7 +227,7 @@ export default function Reajustes() {
           <>
             <button className="btn btn-ghost" onClick={() => setModalAberto(false)}>Cancelar</button>
             <button className="btn btn-primary" onClick={handleSalvar} disabled={salvando}>
-              {salvando ? '⏳ Salvando...' : '💾 Salvar'}
+              {salvando ? 'Salvando...' : 'Salvar'}
             </button>
           </>
         }

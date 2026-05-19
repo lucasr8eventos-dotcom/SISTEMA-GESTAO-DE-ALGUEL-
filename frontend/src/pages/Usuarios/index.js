@@ -4,6 +4,7 @@ import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
 import { formatDataHora } from '../../utils/format';
+import { Pencil, Trash2 } from 'lucide-react';
 
 const FORM_INICIAL = { nome: '', email: '', senha: '', perfil: 'operador', status: 'ativo' };
 
@@ -133,9 +134,9 @@ export default function Usuarios() {
                     <td>{formatDataHora(u.created_at)}</td>
                     <td>
                       <div className="table-actions">
-                        <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => abrirEditar(u)}>✏️</button>
+                        <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => abrirEditar(u)}><Pencil size={14} /></button>
                         {u.id !== usuarioLogado?.id && (
-                          <button className="btn btn-outline-danger btn-sm btn-icon" title="Excluir" onClick={() => setConfirmExcluir(u)}>🗑</button>
+                          <button className="btn btn-outline-danger btn-sm btn-icon" title="Excluir" onClick={() => setConfirmExcluir(u)}><Trash2 size={14} /></button>
                         )}
                       </div>
                     </td>
@@ -155,7 +156,7 @@ export default function Usuarios() {
           <>
             <button className="btn btn-ghost" onClick={() => setModalAberto(false)}>Cancelar</button>
             <button className="btn btn-primary" onClick={handleSalvar} disabled={salvando}>
-              {salvando ? '⏳ Salvando...' : '💾 Salvar'}
+              {salvando ? 'Salvando...' : 'Salvar'}
             </button>
           </>
         }

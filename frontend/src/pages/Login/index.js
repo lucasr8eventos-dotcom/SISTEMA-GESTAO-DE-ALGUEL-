@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
+import { Lock, Loader2 } from 'lucide-react';
 
 export default function Login() {
   const [form, setForm] = useState({ email: '', senha: '' });
@@ -30,7 +31,7 @@ export default function Login() {
     <div className="login-page">
       <div className="login-card">
         <div className="login-logo">
-          <div className="logo-box">🏢</div>
+          <div className="logo-box"><Lock size={28} color="white" /></div>
           <h1>GestãoAluguel</h1>
           <p>Sistema de Gestão de Imóveis</p>
         </div>
@@ -73,13 +74,13 @@ export default function Login() {
             style={{ width: '100%', marginTop: 8 }}
             disabled={loading}
           >
-            {loading ? '⏳ Entrando...' : '🔐 Entrar'}
+            {loading ? <><Loader2 size={16} className="spin-icon" /> Entrando...</> : <><Lock size={16} /> Entrar</>}
           </button>
         </form>
 
         {process.env.NODE_ENV === 'development' && (
           <div style={{ marginTop: 24, padding: 16, background: 'var(--gray-50)', borderRadius: 'var(--radius)', fontSize: 13, color: 'var(--gray-500)', border: '1px dashed var(--gray-300)' }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>🛠 Ambiente de desenvolvimento</div>
+            <div style={{ fontWeight: 600, marginBottom: 6 }}>Ambiente de desenvolvimento</div>
             <div>Admin: admin@sistema.com / admin123</div>
             <div>Operador: operador@sistema.com / admin123</div>
           </div>

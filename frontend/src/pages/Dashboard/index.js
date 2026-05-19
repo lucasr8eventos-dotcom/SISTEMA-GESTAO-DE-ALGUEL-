@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { dashboardService } from '../../services/api';
 import { formatMoeda, formatMesAno, MESES } from '../../utils/format';
+import { Building2, CheckCircle2, KeyRound, DollarSign, Banknote, AlertCircle, AlertTriangle, Receipt, FileText, TrendingUp } from 'lucide-react';
 
 const StatCard = ({ icon, value, label, color, onClick }) => (
   <div className="stat-card" onClick={onClick} style={{ cursor: onClick ? 'pointer' : 'default' }}>
@@ -23,7 +24,7 @@ const AlertCard = ({ icon, title, value, description, color, onClick }) => (
     onClick={onClick}
   >
     <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-      <div style={{ fontSize: 28 }}>{icon}</div>
+      <div style={{ color, display: 'flex', alignItems: 'center' }}>{icon}</div>
       <div>
         <div style={{ fontSize: 20, fontWeight: 700, color }}>{value}</div>
         <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--gray-700)' }}>{title}</div>
@@ -82,70 +83,70 @@ export default function Dashboard() {
       </div>
       <div className="stats-grid">
         <StatCard
-          icon="🏠"
+          icon={<Building2 size={22} />}
           value={stats.totalImoveis}
           label="Total de Imóveis"
           color="var(--primary)"
           onClick={() => navigate('/imoveis')}
         />
         <StatCard
-          icon="✅"
+          icon={<CheckCircle2 size={22} />}
           value={stats.imoveisAlugados}
           label="Imóveis Alugados"
           color="var(--success)"
           onClick={() => navigate('/imoveis?status=alugado')}
         />
         <StatCard
-          icon="🔑"
+          icon={<KeyRound size={22} />}
           value={stats.imoveisVagos}
           label="Imóveis Vagos"
           color="var(--warning)"
           onClick={() => navigate('/imoveis?status=vago')}
         />
         <StatCard
-          icon="💵"
+          icon={<DollarSign size={22} />}
           value={formatMoeda(stats.totalReceber)}
           label={`A Receber — ${mesAtual}`}
           color="var(--info)"
           onClick={() => navigate('/pagamentos')}
         />
         <StatCard
-          icon="💰"
+          icon={<Banknote size={22} />}
           value={formatMoeda(stats.totalRecebido)}
           label={`Recebido — ${mesAtual}`}
           color="var(--success)"
           onClick={() => navigate('/pagamentos')}
         />
         <StatCard
-          icon="🔴"
+          icon={<AlertCircle size={22} />}
           value={formatMoeda(stats.valorAberto)}
           label="Valor em Aberto"
           color="var(--danger)"
           onClick={() => navigate('/pagamentos?status=atrasado')}
         />
         <StatCard
-          icon="⚠️"
+          icon={<AlertTriangle size={22} />}
           value={stats.alugueisAtrasados}
           label="Aluguéis Atrasados"
           color="var(--danger)"
           onClick={() => navigate('/pagamentos?status=atrasado')}
         />
         <StatCard
-          icon="📄"
+          icon={<Receipt size={22} />}
           value={formatMoeda(stats.despesasMes)}
           label={`Despesas — ${mesAtual}`}
           color="var(--warning)"
           onClick={() => navigate('/despesas')}
         />
         <StatCard
-          icon="📋"
+          icon={<FileText size={22} />}
           value={stats.contratosVencendo}
           label="Contratos Vencendo (30d)"
           color="var(--warning)"
           onClick={() => navigate('/contratos')}
         />
         <StatCard
-          icon="📈"
+          icon={<TrendingUp size={22} />}
           value={stats.reajustesPendentes}
           label="Reajustes Pendentes"
           color="var(--accent)"
@@ -226,12 +227,12 @@ export default function Dashboard() {
       {((stats.alertas?.contratosVencendo7Dias > 0) || (stats.alertas?.reajustesUrgentes > 0) || (stats.alertas?.despesasAtrasadas > 0) || stats.alugueisAtrasados > 0) && (
         <div>
           <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12, color: 'var(--gray-700)' }}>
-            ⚠️ Alertas
+            Alertas
           </h2>
           <div className="alerts-grid">
             {stats.alugueisAtrasados > 0 && (
               <AlertCard
-                icon="🔴"
+                icon={<AlertCircle size={24} />}
                 title="Aluguéis Atrasados"
                 value={stats.alugueisAtrasados}
                 description={`Pagamentos em atraso em ${mesAtual}/${anoAtual}`}
@@ -241,7 +242,7 @@ export default function Dashboard() {
             )}
             {stats.alertas?.contratosVencendo7Dias > 0 && (
               <AlertCard
-                icon="📋"
+                icon={<FileText size={24} />}
                 title="Contratos Vencendo"
                 value={stats.alertas.contratosVencendo7Dias}
                 description="Contratos que vencem nos próximos 7 dias"
@@ -251,7 +252,7 @@ export default function Dashboard() {
             )}
             {stats.alertas?.reajustesUrgentes > 0 && (
               <AlertCard
-                icon="📈"
+                icon={<TrendingUp size={24} />}
                 title="Reajustes Urgentes"
                 value={stats.alertas.reajustesUrgentes}
                 description="Reajustes pendentes para os próximos 30 dias"
@@ -261,7 +262,7 @@ export default function Dashboard() {
             )}
             {stats.alertas?.despesasAtrasadas > 0 && (
               <AlertCard
-                icon="📄"
+                icon={<Receipt size={24} />}
                 title="Despesas Atrasadas"
                 value={stats.alertas.despesasAtrasadas}
                 description="Despesas com pagamento em atraso"

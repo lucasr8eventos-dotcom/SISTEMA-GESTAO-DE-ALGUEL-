@@ -60,11 +60,11 @@ export default function Relatorios() {
   };
 
   const tabas = [
-    { id: 'mensal', label: '📅 Mensal' },
-    { id: 'inadimplencia', label: '🔴 Inadimplência' },
-    { id: 'imoveis-vagos', label: '🔑 Imóveis Vagos' },
-    { id: 'contratos-vencendo', label: '📋 Contratos Vencendo' },
-    { id: 'despesas', label: '📄 Despesas' }
+    { id: 'mensal', label: 'Mensal' },
+    { id: 'inadimplencia', label: 'Inadimplência' },
+    { id: 'imoveis-vagos', label: 'Imóveis Vagos' },
+    { id: 'contratos-vencendo', label: 'Contratos Vencendo' },
+    { id: 'despesas', label: 'Despesas' }
   ];
 
   const usaFiltroMesAno = ['mensal', 'despesas'].includes(abaAtiva);
@@ -232,15 +232,15 @@ export default function Relatorios() {
               </>
             )}
             <button className="btn btn-primary" onClick={buscarRelatorio} disabled={loading}>
-              {loading ? '⏳ Gerando...' : '🔍 Gerar Relatório'}
+              {loading ? 'Gerando...' : 'Gerar Relatório'}
             </button>
             {buscou && dados.length > 0 && (
               <>
                 <button className="btn btn-success btn-sm" onClick={() => exportar('excel')} disabled={exportando}>
-                  {exportando ? '⏳...' : '📊 Excel'}
+                  {exportando ? '...' : 'Excel'}
                 </button>
                 <button className="btn btn-danger btn-sm" onClick={() => exportar('pdf')} disabled={exportando}>
-                  {exportando ? '⏳...' : '📄 PDF'}
+                  {exportando ? '...' : 'PDF'}
                 </button>
               </>
             )}

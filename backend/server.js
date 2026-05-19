@@ -118,14 +118,6 @@ app.use('/uploads', (req, res, next) => {
 }, express.static(uploadDir));
 
 // ============================================================
-// HEALTH CHECK
-// ============================================================
-
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-// ============================================================
 // AUTENTICAÇÃO E AUTORIZAÇÃO
 // ============================================================
 
@@ -143,7 +135,7 @@ const authenticateToken = (req, res, next) => {
   const token = authHeader && authHeader.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Token não fornecido' });
 
-  jwt.verify(token, JWT_SECRET || 'dev_only_secret_not_for_production_use', (err, user) => {
+  jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) return res.status(403).json({ error: 'Token inválido ou expirado' });
     req.user = user;
     next();
@@ -221,6 +213,8 @@ app.post('/api/auth/login', loginLimiter, [
     res.status(500).json({ error: 'Erro no servidor' });
   }
 });
+
+
 
 app.get('/api/auth/verify', authenticateToken, (req, res) => {
   res.json({ valid: true, user: req.user });
