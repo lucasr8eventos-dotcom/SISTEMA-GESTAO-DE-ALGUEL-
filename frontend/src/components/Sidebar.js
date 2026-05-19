@@ -45,7 +45,7 @@ const adminItems = [
 export default function Sidebar({ collapsed, mobileOpen, onCollapse }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { isAdmin, usuario, logout } = useAuth();
+  const { isAdmin, logout } = useAuth();
 
   const allItems = isAdmin ? [...navItems, ...adminItems] : navItems;
 

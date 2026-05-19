@@ -17,6 +17,10 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Confia em 1 proxy à frente (Railway / Render / Nginx) para que req.ip e
+// express-rate-limit usem o IP real do cliente em vez do IP do proxy.
+app.set('trust proxy', 1);
+
 // ============================================================
 // MIDDLEWARES DE SEGURANÇA
 // ============================================================
@@ -269,6 +273,11 @@ app.put('/api/usuarios/:id', authenticateToken, authorizeAdmin, [
     const { id } = req.params;
     const { nome, email, senha, perfil, status } = req.body;
 
+    const emailExiste = await pool.query('SELECT id FROM usuarios WHERE email=$1 AND id<>$2', [email, id]);
+    if (emailExiste.rows.length > 0) {
+      return res.status(400).json({ error: 'Email já cadastrado em outro usuário' });
+    }
+
     let query, params;
     if (senha) {
       const senhaHash = await bcrypt.hash(senha, 12);
@@ -285,6 +294,7 @@ app.put('/api/usuarios/:id', authenticateToken, authorizeAdmin, [
     await logAtividade(req.user.id, 'editar_usuario', 'usuarios', parseInt(id), null, req.ip);
     res.json(result.rows[0]);
   } catch (error) {
+    console.error('Erro editar usuário:', error);
     res.status(500).json({ error: 'Erro no servidor' });
   }
 });
@@ -383,6 +393,15 @@ app.put('/api/inquilinos/:id', authenticateToken, [
     const { id } = req.params;
     const { nome, cpf_cnpj, telefone, email, endereco, observacoes } = req.body;
 
+    const cpfDigits = cpf_cnpj.replace(/\D/g, '');
+    const existe = await pool.query(
+      "SELECT id FROM inquilinos WHERE REGEXP_REPLACE(cpf_cnpj, '[^0-9]', '', 'g') = $1 AND id<>$2",
+      [cpfDigits, id]
+    );
+    if (existe.rows.length > 0) {
+      return res.status(400).json({ error: 'CPF/CNPJ já cadastrado em outro inquilino' });
+    }
+
     const result = await pool.query(
       'UPDATE inquilinos SET nome=$1, cpf_cnpj=$2, telefone=$3, email=$4, endereco=$5, observacoes=$6, updated_at=NOW() WHERE id=$7 RETURNING *',
       [nome, cpf_cnpj, telefone, email || null, endereco, observacoes, id]
@@ -393,6 +412,7 @@ app.put('/api/inquilinos/:id', authenticateToken, [
     await logAtividade(req.user.id, 'editar_inquilino', 'inquilinos', parseInt(id), null, req.ip);
     res.json(result.rows[0]);
   } catch (error) {
+    console.error('Erro editar inquilino:', error);
     res.status(500).json({ error: 'Erro no servidor' });
   }
 });
@@ -481,6 +501,10 @@ app.post('/api/imoveis', authenticateToken, [
       dia_vencimento, status, numero_iptu, matricula, conta_agua, conta_energia, observacoes
     } = req.body;
 
+    if (valor_com_desconto && parseFloat(valor_com_desconto) > parseFloat(valor_sem_desconto)) {
+      return res.status(400).json({ error: 'Valor com desconto não pode ser maior que valor sem desconto' });
+    }
+
     const existe = await pool.query('SELECT id FROM imoveis WHERE codigo=$1', [codigo]);
     if (existe.rows.length > 0) {
       return res.status(400).json({ error: 'Código de imóvel já cadastrado' });
@@ -517,6 +541,15 @@ app.put('/api/imoveis/:id', authenticateToken, [
       dia_vencimento, status, numero_iptu, matricula, conta_agua, conta_energia, observacoes
     } = req.body;
 
+    if (valor_com_desconto && parseFloat(valor_com_desconto) > parseFloat(valor_sem_desconto)) {
+      return res.status(400).json({ error: 'Valor com desconto não pode ser maior que valor sem desconto' });
+    }
+
+    const existe = await pool.query('SELECT id FROM imoveis WHERE codigo=$1 AND id<>$2', [codigo, id]);
+    if (existe.rows.length > 0) {
+      return res.status(400).json({ error: 'Código de imóvel já cadastrado em outro imóvel' });
+    }
+
     const result = await pool.query(
       `UPDATE imoveis SET codigo=$1, tipo=$2, endereco=$3, valor_com_desconto=$4,
         valor_sem_desconto=$5, dia_vencimento=$6, status=$7, numero_iptu=$8,
@@ -531,6 +564,7 @@ app.put('/api/imoveis/:id', authenticateToken, [
     await logAtividade(req.user.id, 'editar_imovel', 'imoveis', parseInt(id), null, req.ip);
     res.json(result.rows[0]);
   } catch (error) {
+    console.error('Erro editar imóvel:', error);
     res.status(500).json({ error: 'Erro no servidor' });
   }
 });
@@ -541,21 +575,23 @@ app.delete('/api/imoveis/:id', authenticateToken, authorizeAdmin, [
   try {
     const { id } = req.params;
 
-    const contratos = await pool.query(
-      "SELECT id FROM contratos WHERE imovel_id=$1 AND status='ativo'", [id]
-    );
+    const contratos = await pool.query('SELECT id, status FROM contratos WHERE imovel_id=$1', [id]);
     if (contratos.rows.length > 0) {
-      return res.status(400).json({ error: 'Imóvel possui contratos ativos. Encerre os contratos antes de excluir.' });
+      const temAtivo = contratos.rows.some(c => c.status === 'ativo');
+      const msg = temAtivo
+        ? 'Imóvel possui contratos ativos. Encerre os contratos antes de excluir.'
+        : 'Imóvel possui contratos vinculados. Exclua os contratos antes de excluir o imóvel.';
+      return res.status(400).json({ error: msg });
     }
 
-    const todosContratos = await pool.query('SELECT id FROM contratos WHERE imovel_id=$1', [id]);
-    if (todosContratos.rows.length > 0) {
-      return res.status(400).json({ error: 'Imóvel possui contratos vinculados. Exclua os contratos antes de excluir o imóvel.' });
-    }
-
-    const pagamentos = await pool.query('SELECT id FROM pagamentos WHERE imovel_id=$1', [id]);
+    const pagamentos = await pool.query('SELECT id FROM pagamentos WHERE imovel_id=$1 LIMIT 1', [id]);
     if (pagamentos.rows.length > 0) {
       return res.status(400).json({ error: 'Imóvel possui pagamentos registrados e não pode ser excluído.' });
+    }
+
+    const despesas = await pool.query('SELECT id FROM despesas WHERE imovel_id=$1 LIMIT 1', [id]);
+    if (despesas.rows.length > 0) {
+      return res.status(400).json({ error: 'Imóvel possui despesas vinculadas. Exclua as despesas antes de excluir o imóvel.' });
     }
 
     const result = await pool.query('DELETE FROM imoveis WHERE id=$1 RETURNING id', [id]);
@@ -564,6 +600,7 @@ app.delete('/api/imoveis/:id', authenticateToken, authorizeAdmin, [
     await logAtividade(req.user.id, 'excluir_imovel', 'imoveis', parseInt(id), null, req.ip);
     res.json({ message: 'Imóvel excluído com sucesso' });
   } catch (error) {
+    console.error('Erro excluir imóvel:', error);
     res.status(500).json({ error: 'Erro no servidor' });
   }
 });
@@ -1004,8 +1041,8 @@ app.get('/api/pagamentos/:id/recibo', authenticateToken, [
     doc.text(`CPF/CNPJ: ${p.inquilino_documento || 'N/A'}`);
     doc.moveDown();
     doc.text(`Valor do Aluguel: R$ ${parseFloat(p.valor_aluguel).toFixed(2)}`);
-    doc.text(`Valor Recebido: R$ ${parseFloat(p.valor_recebido || 0).toFixed(2)}`);
-    doc.text(`Data do Pagamento: ${p.data_pagamento ? new Date(p.data_pagamento).toLocaleDateString('pt-BR') : 'N/A'}`);
+    doc.text(`Valor Recebido: R$ ${parseFloat(p.valor_recebido || p.valor_aluguel || 0).toFixed(2)}`);
+    doc.text(`Data do Pagamento: ${p.data_pagamento ? new Date(p.data_pagamento).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : 'N/A'}`);
     doc.text(`Forma de Pagamento: ${p.forma_pagamento || 'N/A'}`);
     doc.text(`Status: ${p.status.toUpperCase()}`);
     doc.moveDown(3);
@@ -1528,10 +1565,65 @@ app.get('/api/relatorios/exportar/pdf', authenticateToken, async (req, res) => {
 });
 
 // ============================================================
+// HEALTH CHECK
+// ============================================================
+
+app.get('/health', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ status: 'ok', db: 'ok', uptime: process.uptime() });
+  } catch (e) {
+    res.status(503).json({ status: 'degraded', db: 'down' });
+  }
+});
+
+app.get('/', (req, res) => {
+  res.json({ name: 'gestao-alugueis-api', version: '2.0.0', status: 'running' });
+});
+
+// ============================================================
+// ERROR HANDLER GLOBAL
+// ============================================================
+
+// 404 para rotas /api desconhecidas
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'Rota não encontrada' });
+});
+
+// Captura erros de Multer (arquivo grande, tipo inválido) e outros não tratados
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: 'Arquivo excede o tamanho máximo permitido' });
+    }
+    return res.status(400).json({ error: `Erro no upload: ${err.message}` });
+  }
+  if (err && err.message && err.message.includes('Tipo de arquivo')) {
+    return res.status(400).json({ error: err.message });
+  }
+  console.error('Erro não tratado:', err);
+  res.status(500).json({ error: 'Erro interno do servidor' });
+});
+
+// ============================================================
 // INICIAR SERVIDOR
 // ============================================================
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
   console.log(`📍 Ambiente: ${process.env.NODE_ENV || 'development'}`);
 });
+
+// Graceful shutdown
+const shutdown = (signal) => {
+  console.log(`\n${signal} recebido. Encerrando servidor...`);
+  server.close(() => {
+    pool.end(() => {
+      console.log('Conexões encerradas. Adeus!');
+      process.exit(0);
+    });
+  });
+};
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

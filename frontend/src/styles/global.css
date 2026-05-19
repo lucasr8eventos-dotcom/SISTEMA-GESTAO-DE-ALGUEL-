@@ -762,40 +762,6 @@ textarea.form-control { min-height: 80px; resize: vertical; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ===== PAGINATION ===== */
-.pagination {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-  margin-top: 16px;
-}
-
-.pagination button {
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--gray-300);
-  background: var(--white);
-  border-radius: var(--radius);
-  font-size: 13px;
-  color: var(--gray-600);
-  transition: all var(--transition);
-}
-
-.pagination button:hover:not(:disabled) {
-  background: var(--primary);
-  color: var(--white);
-  border-color: var(--primary);
-}
-
-.pagination button.active {
-  background: var(--primary);
-  color: var(--white);
-  border-color: var(--primary);
-}
-
-.pagination button:disabled { opacity: 0.4; }
-
 /* ===== CONFIRM DIALOG ===== */
 .confirm-dialog { max-width: 400px; }
 
@@ -920,6 +886,7 @@ textarea.form-control { min-height: 80px; resize: vertical; }
   border-top: 1px solid var(--gray-200);
   flex-wrap: wrap;
 }
+.pagination .btn:disabled { opacity: 0.4; }
 .pagination-ellipsis {
   padding: 0 6px;
   color: var(--gray-400);
