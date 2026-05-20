@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { dashboardService } from '../../services/api';
-import { formatMoeda, formatMesAno, MESES } from '../../utils/format';
+import { formatMoeda, MESES } from '../../utils/format';
 import { Building2, CheckCircle2, KeyRound, DollarSign, Banknote, AlertCircle, AlertTriangle, Receipt, FileText, TrendingUp } from 'lucide-react';
 
 const StatCard = ({ icon, value, label, color, onClick }) => (

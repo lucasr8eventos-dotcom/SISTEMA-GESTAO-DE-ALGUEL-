@@ -171,6 +171,58 @@ const logAtividade = async (usuarioId, acao, entidade = null, entidadeId = null,
 };
 
 // ============================================================
+// HELPERS DE NEGÓCIO
+// ============================================================
+
+// Verifica se contrato_id pertence ao imovel_id informado.
+// Retorna { ok: true } se coerente (ou se contrato_id é nulo).
+const validarContratoDoImovel = async (contratoId, imovelId) => {
+  if (!contratoId) return { ok: true };
+  const r = await pool.query('SELECT imovel_id FROM contratos WHERE id=$1', [contratoId]);
+  if (r.rows.length === 0) return { ok: false, error: 'Contrato informado não existe' };
+  if (String(r.rows[0].imovel_id) !== String(imovelId)) {
+    return { ok: false, error: 'O contrato informado não pertence ao imóvel selecionado' };
+  }
+  return { ok: true };
+};
+
+// Verifica se já existe contrato ativo com datas sobrepostas no mesmo imóvel.
+// Considera sobreposição: novo.data_inicio <= existente.data_fim AND novo.data_fim >= existente.data_inicio
+const existeContratoSobreposto = async (imovelId, dataInicio, dataFim, excluirId = null) => {
+  const params = [imovelId, dataInicio, dataFim];
+  let sql = `SELECT id, data_inicio, data_fim FROM contratos
+             WHERE imovel_id=$1 AND status='ativo'
+               AND data_inicio <= $3 AND data_fim >= $2`;
+  if (excluirId) {
+    params.push(excluirId);
+    sql += ` AND id <> $${params.length}`;
+  }
+  const r = await pool.query(sql, params);
+  return r.rows[0] || null;
+};
+
+// Sincroniza status de contratos vencidos e pagamentos atrasados.
+// Executada no startup e periodicamente.
+const sincronizarStatusVencidos = async () => {
+  try {
+    const c = await pool.query(
+      "UPDATE contratos SET status='vencido' WHERE status='ativo' AND data_fim < CURRENT_DATE RETURNING id"
+    );
+    const p = await pool.query(
+      "UPDATE pagamentos SET status='atrasado' WHERE status='pendente' AND data_vencimento < CURRENT_DATE RETURNING id"
+    );
+    const d = await pool.query(
+      "UPDATE despesas SET status='atrasado' WHERE status='pendente' AND vencimento < CURRENT_DATE RETURNING id"
+    );
+    if (c.rowCount || p.rowCount || d.rowCount) {
+      console.log(`🔁 Sync de vencidos: ${c.rowCount} contrato(s), ${p.rowCount} pagamento(s), ${d.rowCount} despesa(s)`);
+    }
+  } catch (err) {
+    console.error('Erro ao sincronizar vencidos:', err.message);
+  }
+};
+
+// ============================================================
 // AUTENTICAÇÃO
 // ============================================================
 
@@ -198,7 +250,7 @@ app.post('/api/auth/login', loginLimiter, [
 
     const token = jwt.sign(
       { id: usuario.id, email: usuario.email, perfil: usuario.perfil, nome: usuario.nome },
-      JWT_SECRET || 'dev_only_secret_not_for_production_use',
+      JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
     );
 
@@ -700,11 +752,11 @@ app.post('/api/contratos', authenticateToken, upload.single('arquivo_pdf'), [
     }
 
     if (status === 'ativo') {
-      const contratoAtivo = await pool.query(
-        "SELECT id FROM contratos WHERE imovel_id=$1 AND status='ativo'", [imovel_id]
-      );
-      if (contratoAtivo.rows.length > 0) {
-        return res.status(400).json({ error: 'Este imóvel já possui um contrato ativo. Encerre o contrato atual antes de criar um novo.' });
+      const sobreposto = await existeContratoSobreposto(imovel_id, data_inicio, data_fim);
+      if (sobreposto) {
+        return res.status(400).json({
+          error: `Já existe contrato ativo neste imóvel (${sobreposto.data_inicio} a ${sobreposto.data_fim}) com sobreposição de datas.`
+        });
       }
     }
 
@@ -749,6 +801,15 @@ app.put('/api/contratos/:id', authenticateToken, upload.single('arquivo_pdf'), [
     }
 
     const contratoAntes = contrato.rows[0];
+
+    if (status === 'ativo') {
+      const sobreposto = await existeContratoSobreposto(imovel_id, data_inicio, data_fim, id);
+      if (sobreposto) {
+        return res.status(400).json({
+          error: `Já existe contrato ativo neste imóvel (${sobreposto.data_inicio} a ${sobreposto.data_fim}) com sobreposição de datas.`
+        });
+      }
+    }
 
     const result = await pool.query(
       `UPDATE contratos SET imovel_id=$1, inquilino_id=$2, data_inicio=$3, data_fim=$4,
@@ -879,6 +940,9 @@ app.post('/api/pagamentos', authenticateToken, [
       return res.status(400).json({ error: `Já existe um pagamento registrado para este imóvel em ${mes}/${ano}. Edite o registro existente.` });
     }
 
+    const coerencia = await validarContratoDoImovel(contrato_id, imovel_id);
+    if (!coerencia.ok) return res.status(400).json({ error: coerencia.error });
+
     const result = await pool.query(
       `INSERT INTO pagamentos (mes, ano, imovel_id, contrato_id, valor_aluguel, data_vencimento,
         data_pagamento, valor_recebido, forma_pagamento, status, observacoes)
@@ -890,6 +954,9 @@ app.post('/api/pagamentos', authenticateToken, [
     await logAtividade(req.user.id, 'registrar_pagamento', 'pagamentos', result.rows[0].id, `${mes}/${ano}`, req.ip);
     res.status(201).json(result.rows[0]);
   } catch (error) {
+    if (error.code === '23505') {
+      return res.status(400).json({ error: 'Já existe um pagamento registrado para este imóvel neste mês/ano.' });
+    }
     res.status(500).json({ error: 'Erro no servidor' });
   }
 });
@@ -910,6 +977,17 @@ app.put('/api/pagamentos/:id', authenticateToken, [
       data_pagamento, valor_recebido, forma_pagamento, status, observacoes
     } = req.body;
 
+    const duplicado = await pool.query(
+      'SELECT id FROM pagamentos WHERE mes=$1 AND ano=$2 AND imovel_id=$3 AND id<>$4',
+      [mes, ano, imovel_id, id]
+    );
+    if (duplicado.rows.length > 0) {
+      return res.status(400).json({ error: `Já existe outro pagamento para este imóvel em ${mes}/${ano}.` });
+    }
+
+    const coerencia = await validarContratoDoImovel(contrato_id, imovel_id);
+    if (!coerencia.ok) return res.status(400).json({ error: coerencia.error });
+
     const result = await pool.query(
       `UPDATE pagamentos SET mes=$1, ano=$2, imovel_id=$3, contrato_id=$4, valor_aluguel=$5,
         data_vencimento=$6, data_pagamento=$7, valor_recebido=$8, forma_pagamento=$9,
@@ -924,6 +1002,9 @@ app.put('/api/pagamentos/:id', authenticateToken, [
     await logAtividade(req.user.id, 'editar_pagamento', 'pagamentos', parseInt(id), null, req.ip);
     res.json(result.rows[0]);
   } catch (error) {
+    if (error.code === '23505') {
+      return res.status(400).json({ error: 'Já existe um pagamento registrado para este imóvel neste mês/ano.' });
+    }
     res.status(500).json({ error: 'Erro no servidor' });
   }
 });
@@ -1187,16 +1268,22 @@ app.post('/api/reajustes', authenticateToken, [
   body('valor_atual').isFloat({ min: 0 }),
   body('data_proximo').isDate(),
   body('percentual').isFloat({ min: 0, max: 100 }),
-  body('novo_valor').isFloat({ min: 0 }),
+  body('novo_valor').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0 }),
   body('status').isIn(['pendente', 'avisado', 'aplicado'])
 ], validate, async (req, res) => {
   try {
-    const { imovel_id, contrato_id, valor_atual, data_ultimo, data_proximo, percentual, novo_valor, status, observacoes } = req.body;
+    const { imovel_id, contrato_id, valor_atual, data_ultimo, data_proximo, percentual, status, observacoes } = req.body;
+    const novoValorCalc = req.body.novo_valor
+      ? parseFloat(req.body.novo_valor)
+      : Number((parseFloat(valor_atual) * (1 + parseFloat(percentual) / 100)).toFixed(2));
+
+    const coerencia = await validarContratoDoImovel(contrato_id, imovel_id);
+    if (!coerencia.ok) return res.status(400).json({ error: coerencia.error });
 
     const result = await pool.query(
       `INSERT INTO reajustes (imovel_id, contrato_id, valor_atual, data_ultimo, data_proximo, percentual, novo_valor, status, observacoes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [imovel_id, contrato_id || null, valor_atual, data_ultimo || null, data_proximo, percentual, novo_valor, status, observacoes]
+      [imovel_id, contrato_id || null, valor_atual, data_ultimo || null, data_proximo, percentual, novoValorCalc, status, observacoes]
     );
 
     await logAtividade(req.user.id, 'criar_reajuste', 'reajustes', result.rows[0].id, null, req.ip);
@@ -1212,18 +1299,24 @@ app.put('/api/reajustes/:id', authenticateToken, [
   body('valor_atual').isFloat({ min: 0 }),
   body('data_proximo').isDate(),
   body('percentual').isFloat({ min: 0, max: 100 }),
-  body('novo_valor').isFloat({ min: 0 }),
+  body('novo_valor').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0 }),
   body('status').isIn(['pendente', 'avisado', 'aplicado'])
 ], validate, async (req, res) => {
   try {
     const { id } = req.params;
-    const { imovel_id, contrato_id, valor_atual, data_ultimo, data_proximo, percentual, novo_valor, status, observacoes } = req.body;
+    const { imovel_id, contrato_id, valor_atual, data_ultimo, data_proximo, percentual, status, observacoes } = req.body;
+    const novoValorCalc = req.body.novo_valor
+      ? parseFloat(req.body.novo_valor)
+      : Number((parseFloat(valor_atual) * (1 + parseFloat(percentual) / 100)).toFixed(2));
+
+    const coerencia = await validarContratoDoImovel(contrato_id, imovel_id);
+    if (!coerencia.ok) return res.status(400).json({ error: coerencia.error });
 
     const result = await pool.query(
       `UPDATE reajustes SET imovel_id=$1, contrato_id=$2, valor_atual=$3, data_ultimo=$4,
         data_proximo=$5, percentual=$6, novo_valor=$7, status=$8, observacoes=$9, updated_at=NOW()
        WHERE id=$10 RETURNING *`,
-      [imovel_id, contrato_id || null, valor_atual, data_ultimo || null, data_proximo, percentual, novo_valor, status, observacoes, id]
+      [imovel_id, contrato_id || null, valor_atual, data_ultimo || null, data_proximo, percentual, novoValorCalc, status, observacoes, id]
     );
 
     if (result.rows.length === 0) return res.status(404).json({ error: 'Reajuste não encontrado' });
@@ -1615,11 +1708,17 @@ app.use((err, req, res, next) => {
 const server = app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
   console.log(`📍 Ambiente: ${process.env.NODE_ENV || 'development'}`);
+  sincronizarStatusVencidos();
 });
+
+// Re-sincroniza status de contratos / pagamentos / despesas vencidos a cada 6h.
+const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const syncTimer = setInterval(sincronizarStatusVencidos, SYNC_INTERVAL_MS);
 
 // Graceful shutdown
 const shutdown = (signal) => {
   console.log(`\n${signal} recebido. Encerrando servidor...`);
+  clearInterval(syncTimer);
   server.close(() => {
     pool.end(() => {
       console.log('Conexões encerradas. Adeus!');

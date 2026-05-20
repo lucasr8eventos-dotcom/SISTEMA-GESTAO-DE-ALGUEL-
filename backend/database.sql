@@ -113,18 +113,6 @@ CREATE TABLE IF NOT EXISTS reajustes (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS documentos (
-    id SERIAL PRIMARY KEY,
-    entidade VARCHAR(50) NOT NULL CHECK (entidade IN ('contrato', 'imovel', 'inquilino', 'despesa')),
-    entidade_id INTEGER NOT NULL,
-    nome_arquivo VARCHAR(255) NOT NULL,
-    nome_original VARCHAR(255) NOT NULL,
-    tipo_mime VARCHAR(100),
-    tamanho INTEGER,
-    observacoes TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
 CREATE TABLE IF NOT EXISTS log_atividades (
     id SERIAL PRIMARY KEY,
     usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
@@ -156,7 +144,6 @@ CREATE INDEX IF NOT EXISTS idx_despesas_status ON despesas(status);
 CREATE INDEX IF NOT EXISTS idx_despesas_imovel ON despesas(imovel_id);
 CREATE INDEX IF NOT EXISTS idx_reajustes_data_proximo ON reajustes(data_proximo);
 CREATE INDEX IF NOT EXISTS idx_reajustes_status ON reajustes(status);
-CREATE INDEX IF NOT EXISTS idx_documentos_entidade ON documentos(entidade, entidade_id);
 CREATE INDEX IF NOT EXISTS idx_log_usuario ON log_atividades(usuario_id);
 CREATE INDEX IF NOT EXISTS idx_log_created ON log_atividades(created_at);
 -- Garante que não haja dois pagamentos para o mesmo imóvel no mesmo mês/ano
@@ -192,37 +179,6 @@ CREATE TRIGGER trg_reajustes_updated_at BEFORE UPDATE ON reajustes FOR EACH ROW 
 -- ============================================================
 -- VIEWS
 -- ============================================================
-
-CREATE OR REPLACE VIEW vw_pagamentos_completos AS
-SELECT
-    p.*,
-    i.codigo AS imovel_codigo,
-    i.endereco AS imovel_endereco,
-    i.tipo AS imovel_tipo,
-    inq.nome AS inquilino_nome,
-    inq.cpf_cnpj AS inquilino_documento,
-    inq.telefone AS inquilino_telefone
-FROM pagamentos p
-LEFT JOIN imoveis i ON p.imovel_id = i.id
-LEFT JOIN contratos c ON c.id = p.contrato_id
-LEFT JOIN inquilinos inq ON c.inquilino_id = inq.id;
-
-CREATE OR REPLACE VIEW vw_contratos_ativos AS
-SELECT
-    c.*,
-    i.codigo AS imovel_codigo,
-    i.endereco AS imovel_endereco,
-    i.tipo AS imovel_tipo,
-    i.valor_sem_desconto AS imovel_valor,
-    inq.nome AS inquilino_nome,
-    inq.cpf_cnpj AS inquilino_documento,
-    inq.telefone AS inquilino_telefone,
-    inq.email AS inquilino_email,
-    (c.data_fim - CURRENT_DATE) AS dias_para_vencer
-FROM contratos c
-JOIN imoveis i ON c.imovel_id = i.id
-JOIN inquilinos inq ON c.inquilino_id = inq.id
-WHERE c.status = 'ativo';
 
 CREATE OR REPLACE VIEW vw_inadimplencia AS
 SELECT

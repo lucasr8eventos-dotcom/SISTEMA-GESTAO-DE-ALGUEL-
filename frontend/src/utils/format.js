@@ -40,20 +40,6 @@ export const MESES = [
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ];
 
-export const formatMesAno = (mes, ano) => {
-  return `${MESES[mes - 1]}/${ano}`;
-};
-
-export const statusPagamento = (status) => {
-  const map = {
-    pago: { label: 'Pago', className: 'badge-success' },
-    pendente: { label: 'Pendente', className: 'badge-warning' },
-    atrasado: { label: 'Atrasado', className: 'badge-danger' },
-    parcial: { label: 'Parcial', className: 'badge-info' }
-  };
-  return map[status] || { label: status, className: 'badge-gray' };
-};
-
 export const statusContrato = (status) => {
   const map = {
     ativo: { label: 'Ativo', className: 'badge-success' },
