@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { contratosService, imoveisService, inquilinosService } from '../../services/api';
+import { contratosService, imoveisService, inquilinosService, BACKEND_ORIGIN } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
@@ -193,7 +193,7 @@ export default function Contratos() {
                         <div className="table-actions">
                           {c.arquivo_pdf && (
                             <a
-                              href={`/uploads/${c.arquivo_pdf}`}
+                              href={`${BACKEND_ORIGIN}/uploads/${c.arquivo_pdf}`}
                               target="_blank"
                               rel="noreferrer"
                               className="btn btn-ghost btn-sm btn-icon"
