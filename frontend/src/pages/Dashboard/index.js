@@ -55,8 +55,8 @@ export default function Dashboard() {
           'Recebido': parseFloat(r.total_recebido || 0)
         }));
         setEvolucao(evData);
-      } catch (err) {
-        console.error(err);
+      } catch {
+        // falha silenciosa — dashboard fica em branco se a API não responder
       } finally {
         setLoading(false);
       }

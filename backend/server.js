@@ -266,8 +266,6 @@ app.post('/api/auth/login', loginLimiter, [
   }
 });
 
-
-
 app.get('/api/auth/verify', authenticateToken, (req, res) => {
   res.json({ valid: true, user: req.user });
 });
@@ -1566,7 +1564,6 @@ app.get('/api/relatorios/exportar/excel', authenticateToken, async (req, res) =>
         { header: 'Forma', key: 'forma_pagamento', width: 14 },
         { header: 'Status', key: 'status', width: 12 }
       ];
-      ws.getRow(1).font = { bold: true };
       ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
       ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
 
@@ -1647,7 +1644,6 @@ app.get('/api/relatorios/exportar/pdf', authenticateToken, async (req, res) => {
 
     rows.forEach((row, i) => {
       if (i > 0 && i % 25 === 0) doc.addPage();
-      const bg = i % 2 === 0 ? '#f8f9fa' : '#ffffff';
       doc.fontSize(9).fillColor('#333');
       const line = Object.values(row).slice(0, 6).map(v => String(v || '')).join(' | ');
       doc.text(line, 40, doc.y, { width: 760 });
