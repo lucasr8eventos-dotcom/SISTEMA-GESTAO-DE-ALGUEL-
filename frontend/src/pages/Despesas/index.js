@@ -7,6 +7,7 @@ import Modal, { ConfirmDialog } from '../../components/Modal';
 import { MoneyInput } from '../../components/MaskedInput';
 import { formatMoeda, formatData, statusDespesa, tipoDespesaLabel, getMesAtual, getAnoAtual, MESES } from '../../utils/format';
 import Pagination, { PER_PAGE } from '../../components/Pagination';
+import { Pencil, Trash2, Receipt } from 'lucide-react';
 
 const FORM_INICIAL = {
   imovel_id: '', tipo: 'iptu', valor: '', vencimento: '',
@@ -176,7 +177,7 @@ export default function Despesas() {
             <div className="loading-spinner"><div className="spinner" /></div>
           ) : despesas.length === 0 ? (
             <div className="empty-state">
-              <div className="empty-icon">📄</div>
+              <div className="empty-icon"><Receipt size={48} /></div>
               <h3>Nenhuma despesa encontrada</h3>
             </div>
           ) : (
@@ -208,8 +209,8 @@ export default function Despesas() {
                       <td><span className={`badge ${st.className}`}>{st.label}</span></td>
                       <td>
                         <div className="table-actions">
-                          <button className="btn btn-ghost btn-sm btn-icon" onClick={() => abrirEditar(d)}>✏️</button>
-                          {isAdmin && <button className="btn btn-outline-danger btn-sm btn-icon" onClick={() => setConfirmExcluir(d)}>🗑</button>}
+                          <button className="btn btn-ghost btn-sm btn-icon" onClick={() => abrirEditar(d)}><Pencil size={14} /></button>
+                          {isAdmin && <button className="btn btn-outline-danger btn-sm btn-icon" onClick={() => setConfirmExcluir(d)}><Trash2 size={14} /></button>}
                         </div>
                       </td>
                     </tr>
@@ -230,7 +231,7 @@ export default function Despesas() {
           <>
             <button className="btn btn-ghost" onClick={() => setModalAberto(false)}>Cancelar</button>
             <button className="btn btn-primary" onClick={handleSalvar} disabled={salvando}>
-              {salvando ? '⏳ Salvando...' : '💾 Salvar'}
+              {salvando ? 'Salvando...' : 'Salvar'}
             </button>
           </>
         }

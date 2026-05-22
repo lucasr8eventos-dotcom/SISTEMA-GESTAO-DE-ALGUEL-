@@ -1,34 +1,35 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { LayoutDashboard, Building2, Users, FileText, Wallet, Receipt, TrendingUp, BarChart2, Settings, LogOut } from 'lucide-react';
 
 const navItems = [
   {
     section: 'Principal',
     items: [
-      { path: '/', icon: '📊', label: 'Dashboard' }
+      { path: '/', icon: LayoutDashboard, label: 'Dashboard' }
     ]
   },
   {
     section: 'Cadastros',
     items: [
-      { path: '/imoveis', icon: '🏠', label: 'Imóveis' },
-      { path: '/inquilinos', icon: '👤', label: 'Inquilinos' },
-      { path: '/contratos', icon: '📋', label: 'Contratos' }
+      { path: '/imoveis', icon: Building2, label: 'Imóveis' },
+      { path: '/inquilinos', icon: Users, label: 'Inquilinos' },
+      { path: '/contratos', icon: FileText, label: 'Contratos' }
     ]
   },
   {
     section: 'Financeiro',
     items: [
-      { path: '/pagamentos', icon: '💰', label: 'Pagamentos' },
-      { path: '/despesas', icon: '📄', label: 'Despesas' },
-      { path: '/reajustes', icon: '📈', label: 'Reajustes' }
+      { path: '/pagamentos', icon: Wallet, label: 'Pagamentos' },
+      { path: '/despesas', icon: Receipt, label: 'Despesas' },
+      { path: '/reajustes', icon: TrendingUp, label: 'Reajustes' }
     ]
   },
   {
     section: 'Análise',
     items: [
-      { path: '/relatorios', icon: '📑', label: 'Relatórios' }
+      { path: '/relatorios', icon: BarChart2, label: 'Relatórios' }
     ]
   }
 ];
@@ -37,7 +38,7 @@ const adminItems = [
   {
     section: 'Administração',
     items: [
-      { path: '/usuarios', icon: '⚙️', label: 'Usuários' }
+      { path: '/usuarios', icon: Settings, label: 'Usuários' }
     ]
   }
 ];
@@ -57,7 +58,7 @@ export default function Sidebar({ collapsed, mobileOpen, onCollapse }) {
   return (
     <aside className={`sidebar${collapsed ? ' collapsed' : ''}${mobileOpen ? ' open' : ''}`}>
       <div className="sidebar-logo">
-        <div className="logo-icon">🏢</div>
+        <div className="logo-icon"><Building2 size={20} /></div>
         <span className="logo-text">GestãoAluguel</span>
       </div>
 
@@ -72,7 +73,7 @@ export default function Sidebar({ collapsed, mobileOpen, onCollapse }) {
                 onClick={() => navigate(item.path)}
                 title={collapsed ? item.label : ''}
               >
-                <span className="nav-icon">{item.icon}</span>
+                <span className="nav-icon"><item.icon size={18} /></span>
                 <span className="nav-label">{item.label}</span>
               </button>
             ))}
@@ -82,7 +83,7 @@ export default function Sidebar({ collapsed, mobileOpen, onCollapse }) {
 
       <div className="sidebar-footer">
         <button className="nav-item" onClick={handleLogout} title={collapsed ? 'Sair' : ''}>
-          <span className="nav-icon">🚪</span>
+          <span className="nav-icon"><LogOut size={18} /></span>
           <span className="nav-label">Sair</span>
         </button>
       </div>

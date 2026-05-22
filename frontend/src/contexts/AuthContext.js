@@ -42,7 +42,6 @@ export const AuthProvider = ({ children }) => {
     login,
     logout,
     isAdmin: usuario?.perfil === 'admin',
-    isOperador: usuario?.perfil === 'operador',
     loading
   }), [usuario, login, logout, loading]);
 

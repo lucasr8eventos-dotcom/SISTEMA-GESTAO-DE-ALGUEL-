@@ -1,7 +1,13 @@
 import axios from 'axios';
 
+const API_BASE = process.env.REACT_APP_API_URL || '/api';
+
+// Origem do backend (sem /api no final) — usada para montar URLs de arquivos
+// servidos diretamente pelo backend, como /uploads/<arquivo>.
+export const BACKEND_ORIGIN = API_BASE.replace(/\/api\/?$/, '');
+
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || '/api',
+  baseURL: API_BASE,
   timeout: 30000
 });
 

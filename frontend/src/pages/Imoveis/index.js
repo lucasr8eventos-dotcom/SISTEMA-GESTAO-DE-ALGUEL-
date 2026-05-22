@@ -7,6 +7,7 @@ import Modal, { ConfirmDialog } from '../../components/Modal';
 import { MoneyInput } from '../../components/MaskedInput';
 import { formatMoeda, formatData, statusImovel, tipoImovel } from '../../utils/format';
 import Pagination, { PER_PAGE } from '../../components/Pagination';
+import { Pencil, Trash2, Search, History, Building2 } from 'lucide-react';
 
 const FORM_INICIAL = {
   codigo: '', tipo: 'apartamento', endereco: '', valor_sem_desconto: '', valor_com_desconto: '',
@@ -149,7 +150,7 @@ export default function Imoveis() {
 
       <div className="filters-row">
         <div className="search-input-wrap">
-          <span className="search-icon">🔍</span>
+          <span className="search-icon"><Search size={16} /></span>
           <input
             className="form-control"
             placeholder="Buscar por código ou endereço..."
@@ -172,7 +173,7 @@ export default function Imoveis() {
             <div className="loading-spinner"><div className="spinner" /></div>
           ) : imoveis.length === 0 ? (
             <div className="empty-state">
-              <div className="empty-icon">🏠</div>
+              <div className="empty-icon"><Building2 size={48} /></div>
               <h3>Nenhum imóvel encontrado</h3>
               <p>Cadastre um novo imóvel para começar</p>
             </div>
@@ -204,10 +205,10 @@ export default function Imoveis() {
                       <td><span className={`badge ${st.className}`}>{st.label}</span></td>
                       <td>
                         <div className="table-actions">
-                          <button className="btn btn-ghost btn-sm btn-icon" title="Histórico" onClick={() => verHistorico(im)}>📜</button>
-                          <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => abrirEditar(im)}>✏️</button>
+                          <button className="btn btn-ghost btn-sm btn-icon" title="Histórico" onClick={() => verHistorico(im)}><History size={14} /></button>
+                          <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => abrirEditar(im)}><Pencil size={14} /></button>
                           {isAdmin && (
-                            <button className="btn btn-outline-danger btn-sm btn-icon" title="Excluir" onClick={() => setConfirmExcluir(im)}>🗑</button>
+                            <button className="btn btn-outline-danger btn-sm btn-icon" title="Excluir" onClick={() => setConfirmExcluir(im)}><Trash2 size={14} /></button>
                           )}
                         </div>
                       </td>
@@ -231,7 +232,7 @@ export default function Imoveis() {
           <>
             <button className="btn btn-ghost" onClick={() => setModalAberto(false)}>Cancelar</button>
             <button className="btn btn-primary" onClick={handleSalvar} disabled={salvando}>
-              {salvando ? '⏳ Salvando...' : '💾 Salvar'}
+              {salvando ? 'Salvando...' : 'Salvar'}
             </button>
           </>
         }

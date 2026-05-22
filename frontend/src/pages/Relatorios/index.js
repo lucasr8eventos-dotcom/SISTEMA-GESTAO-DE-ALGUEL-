@@ -41,14 +41,18 @@ export default function Relatorios() {
     if (exportando) return;
     setExportando(true);
     try {
-      const params = { tipo: abaAtiva, mes: filtroMes, ano: filtroAno };
+      const usaPeriodo = ['mensal', 'despesas'].includes(abaAtiva);
+      const params = usaPeriodo
+        ? { tipo: abaAtiva, mes: filtroMes, ano: filtroAno }
+        : { tipo: abaAtiva };
+      const sufixo = usaPeriodo ? `-${filtroMes}-${filtroAno}` : '';
       let res, filename;
       if (formato === 'excel') {
         res = await relatoriosService.exportarExcel(params);
-        filename = `relatorio-${abaAtiva}-${filtroMes}-${filtroAno}.xlsx`;
+        filename = `relatorio-${abaAtiva}${sufixo}.xlsx`;
       } else {
         res = await relatoriosService.exportarPdf(params);
-        filename = `relatorio-${abaAtiva}-${filtroMes}-${filtroAno}.pdf`;
+        filename = `relatorio-${abaAtiva}${sufixo}.pdf`;
       }
       downloadBlob(res.data, filename);
       toast.success(`Exportado como ${formato.toUpperCase()}!`);
@@ -59,12 +63,12 @@ export default function Relatorios() {
     }
   };
 
-  const tabas = [
-    { id: 'mensal', label: '📅 Mensal' },
-    { id: 'inadimplencia', label: '🔴 Inadimplência' },
-    { id: 'imoveis-vagos', label: '🔑 Imóveis Vagos' },
-    { id: 'contratos-vencendo', label: '📋 Contratos Vencendo' },
-    { id: 'despesas', label: '📄 Despesas' }
+  const tabs = [
+    { id: 'mensal', label: 'Mensal' },
+    { id: 'inadimplencia', label: 'Inadimplência' },
+    { id: 'imoveis-vagos', label: 'Imóveis Vagos' },
+    { id: 'contratos-vencendo', label: 'Contratos Vencendo' },
+    { id: 'despesas', label: 'Despesas' }
   ];
 
   const usaFiltroMesAno = ['mensal', 'despesas'].includes(abaAtiva);
@@ -203,7 +207,7 @@ export default function Relatorios() {
       <div className="card" style={{ marginBottom: 20 }}>
         <div className="card-body">
           <div className="tabs">
-            {tabas.map(t => (
+            {tabs.map(t => (
               <button
                 key={t.id}
                 className={`tab-btn${abaAtiva === t.id ? ' active' : ''}`}
@@ -232,15 +236,15 @@ export default function Relatorios() {
               </>
             )}
             <button className="btn btn-primary" onClick={buscarRelatorio} disabled={loading}>
-              {loading ? '⏳ Gerando...' : '🔍 Gerar Relatório'}
+              {loading ? 'Gerando...' : 'Gerar Relatório'}
             </button>
             {buscou && dados.length > 0 && (
               <>
                 <button className="btn btn-success btn-sm" onClick={() => exportar('excel')} disabled={exportando}>
-                  {exportando ? '⏳...' : '📊 Excel'}
+                  {exportando ? '...' : 'Excel'}
                 </button>
                 <button className="btn btn-danger btn-sm" onClick={() => exportar('pdf')} disabled={exportando}>
-                  {exportando ? '⏳...' : '📄 PDF'}
+                  {exportando ? '...' : 'PDF'}
                 </button>
               </>
             )}
@@ -252,7 +256,7 @@ export default function Relatorios() {
         <div className="card">
           <div className="card-header">
             <span className="card-title">
-              {tabas.find(t => t.id === abaAtiva)?.label} — {dados.length} resultado(s)
+              {tabs.find(t => t.id === abaAtiva)?.label} — {dados.length} resultado(s)
             </span>
           </div>
           <div className="card-body">
