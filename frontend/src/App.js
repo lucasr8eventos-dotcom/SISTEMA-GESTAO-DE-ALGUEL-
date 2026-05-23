@@ -5,12 +5,11 @@ import { ToastProvider } from './contexts/ToastContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import Agenda from './pages/Agenda';
 import Imoveis from './pages/Imoveis';
-import Inquilinos from './pages/Inquilinos';
 import Contratos from './pages/Contratos';
 import Pagamentos from './pages/Pagamentos';
 import Despesas from './pages/Despesas';
-import Reajustes from './pages/Reajustes';
 import Relatorios from './pages/Relatorios';
 import Usuarios from './pages/Usuarios';
 
@@ -53,14 +52,15 @@ export default function App() {
               }
             />
             <Route path="/" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
+            <Route path="/agenda" element={<PrivateRoute><Agenda /></PrivateRoute>} />
             <Route path="/imoveis" element={<PrivateRoute><Imoveis /></PrivateRoute>} />
-            <Route path="/inquilinos" element={<PrivateRoute><Inquilinos /></PrivateRoute>} />
             <Route path="/contratos" element={<PrivateRoute><Contratos /></PrivateRoute>} />
             <Route path="/pagamentos" element={<PrivateRoute><Pagamentos /></PrivateRoute>} />
             <Route path="/despesas" element={<PrivateRoute><Despesas /></PrivateRoute>} />
-            <Route path="/reajustes" element={<PrivateRoute><Reajustes /></PrivateRoute>} />
             <Route path="/relatorios" element={<PrivateRoute><Relatorios /></PrivateRoute>} />
             <Route path="/usuarios" element={<PrivateRoute adminOnly><Usuarios /></PrivateRoute>} />
+            <Route path="/inquilinos" element={<Navigate to="/imoveis" replace />} />
+            <Route path="/reajustes" element={<Navigate to="/contratos" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </ToastProvider>

@@ -54,7 +54,8 @@ export const statusImovel = (status) => {
     alugado: { label: 'Alugado', className: 'badge-success' },
     vago: { label: 'Vago', className: 'badge-warning' },
     encerrado: { label: 'Encerrado', className: 'badge-gray' },
-    negociacao: { label: 'Negociação', className: 'badge-info' }
+    negociacao: { label: 'Negociação', className: 'badge-info' },
+    manutencao: { label: 'Em Manutenção', className: 'badge-danger' }
   };
   return map[status] || { label: status, className: 'badge-gray' };
 };

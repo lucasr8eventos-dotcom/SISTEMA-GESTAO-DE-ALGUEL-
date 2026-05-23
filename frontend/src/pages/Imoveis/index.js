@@ -1,33 +1,61 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { imoveisService } from '../../services/api';
+import { imoveisService, inquilinosService, contratosService } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
-import { MoneyInput } from '../../components/MaskedInput';
+import Tabs from '../../components/Tabs';
+import { MoneyInput, CpfCnpjInput, PhoneInput } from '../../components/MaskedInput';
+import { maskCpfCnpj, maskPhone } from '../../utils/masks';
 import { formatMoeda, formatData, statusImovel, tipoImovel } from '../../utils/format';
 import Pagination, { PER_PAGE } from '../../components/Pagination';
-import { Pencil, Trash2, Search, History, Building2 } from 'lucide-react';
+import { Pencil, Trash2, Search, History, Building2, CheckCircle2, KeyRound, Wrench, User } from 'lucide-react';
 
-const FORM_INICIAL = {
+const FORM_IMOVEL_INICIAL = {
   codigo: '', tipo: 'apartamento', endereco: '', valor_sem_desconto: '', valor_com_desconto: '',
   dia_vencimento: '', status: 'vago', numero_iptu: '', matricula: '', conta_agua: '',
   conta_energia: '', observacoes: ''
 };
 
+const FORM_INQUILINO_INICIAL = {
+  nome: '', cpf_cnpj: '', telefone: '', email: '', endereco: '', observacoes: ''
+};
+
+const StatCard = ({ icon, value, label, color, active, onClick }) => (
+  <div
+    className={`stat-card${active ? ' stat-card-active' : ''}`}
+    onClick={onClick}
+    style={{ cursor: 'pointer' }}
+  >
+    <div className="stat-icon" style={{ background: color + '18', color }}>{icon}</div>
+    <div className="stat-info">
+      <div className="stat-value">{value}</div>
+      <div className="stat-label">{label}</div>
+    </div>
+  </div>
+);
+
 export default function Imoveis() {
   const [imoveis, setImoveis] = useState([]);
+  const [todosImoveis, setTodosImoveis] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
   const [filtroStatus, setFiltroStatus] = useState('');
   const [modalAberto, setModalAberto] = useState(false);
   const [confirmExcluir, setConfirmExcluir] = useState(null);
-  const [form, setForm] = useState(FORM_INICIAL);
+  const [form, setForm] = useState(FORM_IMOVEL_INICIAL);
   const [editando, setEditando] = useState(null);
   const [salvando, setSalvando] = useState(false);
   const [page, setPage] = useState(1);
   const [historicoModal, setHistoricoModal] = useState(null);
   const [historico, setHistorico] = useState([]);
+  const [abaAtiva, setAbaAtiva] = useState('dados');
+
+  // Aba Inquilino
+  const [formInquilino, setFormInquilino] = useState(FORM_INQUILINO_INICIAL);
+  const [inquilinoVinculado, setInquilinoVinculado] = useState(null);
+  const [salvandoInquilino, setSalvandoInquilino] = useState(false);
+
   const toast = useToast();
   const { isAdmin } = useAuth();
   const location = useLocation();
@@ -50,17 +78,64 @@ export default function Imoveis() {
     }
   }, [busca, filtroStatus]);
 
+  // Lista completa pra contar cards do mini dashboard
+  const fetchTodos = useCallback(async () => {
+    try {
+      const res = await imoveisService.listar();
+      setTodosImoveis(res.data);
+    } catch { /* silencioso */ }
+  }, []);
+
   useEffect(() => {
     const t = setTimeout(fetchImoveis, 300);
     return () => clearTimeout(t);
   }, [fetchImoveis]);
 
+  useEffect(() => { fetchTodos(); }, [fetchTodos]);
+
   useEffect(() => { setPage(1); }, [busca, filtroStatus]);
+
+  const stats = useMemo(() => {
+    const total = todosImoveis.length;
+    const ocupados = todosImoveis.filter((im) => im.status === 'alugado').length;
+    const vagos = todosImoveis.filter((im) => im.status === 'vago').length;
+    const manutencao = todosImoveis.filter((im) => im.status === 'manutencao').length;
+    return { total, ocupados, vagos, manutencao };
+  }, [todosImoveis]);
 
   const abrirNovo = () => {
     setEditando(null);
-    setForm(FORM_INICIAL);
+    setForm(FORM_IMOVEL_INICIAL);
+    setFormInquilino(FORM_INQUILINO_INICIAL);
+    setInquilinoVinculado(null);
+    setAbaAtiva('dados');
     setModalAberto(true);
+  };
+
+  const carregarInquilinoDoImovel = async (imovelId) => {
+    try {
+      const res = await contratosService.listar();
+      const contratoAtivo = res.data.find((c) => c.imovel_id === imovelId && c.status === 'ativo');
+      if (contratoAtivo?.inquilino_id) {
+        const inqRes = await inquilinosService.buscarPorId(contratoAtivo.inquilino_id);
+        const inq = inqRes.data;
+        setInquilinoVinculado(inq);
+        setFormInquilino({
+          nome: inq.nome || '',
+          cpf_cnpj: maskCpfCnpj(inq.cpf_cnpj || ''),
+          telefone: maskPhone(inq.telefone || ''),
+          email: inq.email || '',
+          endereco: inq.endereco || '',
+          observacoes: inq.observacoes || ''
+        });
+      } else {
+        setInquilinoVinculado(null);
+        setFormInquilino(FORM_INQUILINO_INICIAL);
+      }
+    } catch {
+      setInquilinoVinculado(null);
+      setFormInquilino(FORM_INQUILINO_INICIAL);
+    }
   };
 
   const abrirEditar = (imovel) => {
@@ -79,11 +154,13 @@ export default function Imoveis() {
       conta_energia: imovel.conta_energia || '',
       observacoes: imovel.observacoes || ''
     });
+    setAbaAtiva('dados');
+    carregarInquilinoDoImovel(imovel.id);
     setModalAberto(true);
   };
 
   const handleSalvar = async (e) => {
-    e.preventDefault();
+    e?.preventDefault();
     if (
       form.valor_com_desconto &&
       form.valor_sem_desconto &&
@@ -103,10 +180,29 @@ export default function Imoveis() {
       }
       setModalAberto(false);
       fetchImoveis();
+      fetchTodos();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erro ao salvar imóvel');
     } finally {
       setSalvando(false);
+    }
+  };
+
+  const handleSalvarInquilino = async (e) => {
+    e?.preventDefault();
+    setSalvandoInquilino(true);
+    try {
+      if (inquilinoVinculado) {
+        await inquilinosService.atualizar(inquilinoVinculado.id, formInquilino);
+        toast.success('Inquilino atualizado');
+      } else {
+        await inquilinosService.criar(formInquilino);
+        toast.success('Inquilino cadastrado. Para vinculá-lo ao imóvel, crie um contrato.');
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erro ao salvar inquilino');
+    } finally {
+      setSalvandoInquilino(false);
     }
   };
 
@@ -116,6 +212,7 @@ export default function Imoveis() {
       toast.success('Imóvel excluído com sucesso!');
       setConfirmExcluir(null);
       fetchImoveis();
+      fetchTodos();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erro ao excluir imóvel');
     }
@@ -131,10 +228,21 @@ export default function Imoveis() {
     }
   };
 
-  const f = form;
   const setF = (campo, valor) => setForm(prev => ({ ...prev, [campo]: valor }));
+  const setFI = (campo, valor) => setFormInquilino(prev => ({ ...prev, [campo]: valor }));
 
   const paginatedImoveis = imoveis.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+
+  const f = form;
+
+  const tabs = [
+    { id: 'dados', label: 'Dados do Imóvel', icon: <Building2 size={14} /> },
+    { id: 'inquilino', label: 'Inquilino', icon: <User size={14} /> }
+  ];
+
+  const toggleFiltroCard = (status) => {
+    setFiltroStatus(filtroStatus === status ? '' : status);
+  };
 
   return (
     <div>
@@ -143,9 +251,42 @@ export default function Imoveis() {
           <h1>Imóveis</h1>
           <p>{imoveis.length} imóvel(is) encontrado(s)</p>
         </div>
-        <button className="btn btn-primary" onClick={abrirNovo}>
-          + Novo Imóvel
-        </button>
+        <button className="btn btn-primary" onClick={abrirNovo}>+ Novo Imóvel</button>
+      </div>
+
+      <div className="stats-grid stats-grid-4" style={{ marginBottom: 20 }}>
+        <StatCard
+          icon={<Building2 size={22} />}
+          value={stats.total}
+          label="Total de Imóveis"
+          color="var(--primary)"
+          active={filtroStatus === ''}
+          onClick={() => setFiltroStatus('')}
+        />
+        <StatCard
+          icon={<CheckCircle2 size={22} />}
+          value={stats.ocupados}
+          label="Ocupados"
+          color="var(--success)"
+          active={filtroStatus === 'alugado'}
+          onClick={() => toggleFiltroCard('alugado')}
+        />
+        <StatCard
+          icon={<KeyRound size={22} />}
+          value={stats.vagos}
+          label="Vagos"
+          color="var(--warning)"
+          active={filtroStatus === 'vago'}
+          onClick={() => toggleFiltroCard('vago')}
+        />
+        <StatCard
+          icon={<Wrench size={22} />}
+          value={stats.manutencao}
+          label="Em Manutenção"
+          color="var(--danger)"
+          active={filtroStatus === 'manutencao'}
+          onClick={() => toggleFiltroCard('manutencao')}
+        />
       </div>
 
       <div className="filters-row">
@@ -163,6 +304,7 @@ export default function Imoveis() {
           <option value="alugado">Alugado</option>
           <option value="vago">Vago</option>
           <option value="negociacao">Em Negociação</option>
+          <option value="manutencao">Em Manutenção</option>
           <option value="encerrado">Encerrado</option>
         </select>
       </div>
@@ -195,7 +337,7 @@ export default function Imoveis() {
                 {paginatedImoveis.map((im) => {
                   const st = statusImovel(im.status);
                   return (
-                    <tr key={im.id}>
+                    <tr key={im.id} className="clickable-row" onClick={() => abrirEditar(im)}>
                       <td><strong>{im.codigo}</strong></td>
                       <td>{tipoImovel(im.tipo)}</td>
                       <td style={{ maxWidth: 260 }}>{im.endereco}</td>
@@ -203,7 +345,7 @@ export default function Imoveis() {
                       <td>{formatMoeda(im.valor_sem_desconto)}</td>
                       <td>Dia {im.dia_vencimento}</td>
                       <td><span className={`badge ${st.className}`}>{st.label}</span></td>
-                      <td>
+                      <td onClick={(e) => e.stopPropagation()}>
                         <div className="table-actions">
                           <button className="btn btn-ghost btn-sm btn-icon" title="Histórico" onClick={() => verHistorico(im)}><History size={14} /></button>
                           <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => abrirEditar(im)}><Pencil size={14} /></button>
@@ -222,95 +364,154 @@ export default function Imoveis() {
         <Pagination total={imoveis.length} page={page} perPage={PER_PAGE} onChange={setPage} />
       </div>
 
-      {/* Modal Formulário */}
+      {/* Modal Formulário com abas */}
       <Modal
         isOpen={modalAberto}
         onClose={() => setModalAberto(false)}
-        title={editando ? 'Editar Imóvel' : 'Novo Imóvel'}
+        title={editando ? `Imóvel — ${form.codigo}` : 'Novo Imóvel'}
         size="lg"
         footer={
-          <>
-            <button className="btn btn-ghost" onClick={() => setModalAberto(false)}>Cancelar</button>
-            <button className="btn btn-primary" onClick={handleSalvar} disabled={salvando}>
-              {salvando ? 'Salvando...' : 'Salvar'}
-            </button>
-          </>
+          abaAtiva === 'dados' ? (
+            <>
+              <button className="btn btn-ghost" onClick={() => setModalAberto(false)}>Cancelar</button>
+              <button className="btn btn-primary" onClick={handleSalvar} disabled={salvando}>
+                {salvando ? 'Salvando...' : 'Salvar'}
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn btn-ghost" onClick={() => setModalAberto(false)}>Fechar</button>
+              <button className="btn btn-primary" onClick={handleSalvarInquilino} disabled={salvandoInquilino}>
+                {salvandoInquilino ? 'Salvando...' : inquilinoVinculado ? 'Atualizar Inquilino' : 'Cadastrar Inquilino'}
+              </button>
+            </>
+          )
         }
       >
-        <form onSubmit={handleSalvar}>
-          <div className="form-grid">
-            <div className="form-group">
-              <label className="form-label">Código <span className="required">*</span></label>
-              <input className="form-control" value={f.codigo} onChange={(e) => setF('codigo', e.target.value)} required placeholder="Ex: IM001" />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Tipo <span className="required">*</span></label>
-              <select className="form-control" value={f.tipo} onChange={(e) => setF('tipo', e.target.value)} required>
-                <option value="apartamento">Apartamento</option>
-                <option value="casa">Casa</option>
-                <option value="comercial">Comercial</option>
-                <option value="terreno">Terreno</option>
-                <option value="galpao">Galpão</option>
-              </select>
-            </div>
-          </div>
+        <Tabs tabs={tabs} active={abaAtiva} onChange={setAbaAtiva} />
 
-          <div className="form-group">
-            <label className="form-label">Endereço Completo <span className="required">*</span></label>
-            <input className="form-control" value={f.endereco} onChange={(e) => setF('endereco', e.target.value)} required placeholder="Rua, número, complemento, bairro, cidade" />
-          </div>
+        {abaAtiva === 'dados' && (
+          <form onSubmit={handleSalvar}>
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">Código <span className="required">*</span></label>
+                <input className="form-control" value={f.codigo} onChange={(e) => setF('codigo', e.target.value)} required placeholder="Ex: IM001" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Tipo <span className="required">*</span></label>
+                <select className="form-control" value={f.tipo} onChange={(e) => setF('tipo', e.target.value)} required>
+                  <option value="apartamento">Apartamento</option>
+                  <option value="casa">Casa</option>
+                  <option value="comercial">Comercial</option>
+                  <option value="terreno">Terreno</option>
+                  <option value="galpao">Galpão</option>
+                </select>
+              </div>
+            </div>
 
-          <div className="form-grid-3">
             <div className="form-group">
-              <label className="form-label">Valor s/ Desconto <span className="required">*</span></label>
-              <MoneyInput value={f.valor_sem_desconto} onChange={(v) => setF('valor_sem_desconto', v)} required />
+              <label className="form-label">Endereço Completo <span className="required">*</span></label>
+              <input className="form-control" value={f.endereco} onChange={(e) => setF('endereco', e.target.value)} required placeholder="Rua, número, complemento, bairro, cidade" />
             </div>
-            <div className="form-group">
-              <label className="form-label">Valor c/ Desconto</label>
-              <MoneyInput value={f.valor_com_desconto} onChange={(v) => setF('valor_com_desconto', v)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Dia de Vencimento <span className="required">*</span></label>
-              <input className="form-control" type="number" min="1" max="31" value={f.dia_vencimento} onChange={(e) => setF('dia_vencimento', e.target.value)} required />
-            </div>
-          </div>
 
-          <div className="form-grid">
-            <div className="form-group">
-              <label className="form-label">Status <span className="required">*</span></label>
-              <select className="form-control" value={f.status} onChange={(e) => setF('status', e.target.value)} required>
-                <option value="vago">Vago</option>
-                <option value="alugado">Alugado</option>
-                <option value="negociacao">Em Negociação</option>
-                <option value="encerrado">Encerrado</option>
-              </select>
+            <div className="form-grid-3">
+              <div className="form-group">
+                <label className="form-label">Valor s/ Desconto <span className="required">*</span></label>
+                <MoneyInput value={f.valor_sem_desconto} onChange={(v) => setF('valor_sem_desconto', v)} required />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Valor c/ Desconto</label>
+                <MoneyInput value={f.valor_com_desconto} onChange={(v) => setF('valor_com_desconto', v)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Dia de Vencimento <span className="required">*</span></label>
+                <input className="form-control" type="number" min="1" max="31" value={f.dia_vencimento} onChange={(e) => setF('dia_vencimento', e.target.value)} required />
+              </div>
             </div>
-            <div className="form-group">
-              <label className="form-label">Nº IPTU</label>
-              <input className="form-control" value={f.numero_iptu} onChange={(e) => setF('numero_iptu', e.target.value)} />
-            </div>
-          </div>
 
-          <div className="form-grid-3">
-            <div className="form-group">
-              <label className="form-label">Matrícula</label>
-              <input className="form-control" value={f.matricula} onChange={(e) => setF('matricula', e.target.value)} />
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">Status <span className="required">*</span></label>
+                <select className="form-control" value={f.status} onChange={(e) => setF('status', e.target.value)} required>
+                  <option value="vago">Vago</option>
+                  <option value="alugado">Alugado</option>
+                  <option value="negociacao">Em Negociação</option>
+                  <option value="manutencao">Em Manutenção</option>
+                  <option value="encerrado">Encerrado</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Nº IPTU</label>
+                <input className="form-control" value={f.numero_iptu} onChange={(e) => setF('numero_iptu', e.target.value)} />
+              </div>
             </div>
-            <div className="form-group">
-              <label className="form-label">Conta de Água</label>
-              <input className="form-control" value={f.conta_agua} onChange={(e) => setF('conta_agua', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Conta de Energia</label>
-              <input className="form-control" value={f.conta_energia} onChange={(e) => setF('conta_energia', e.target.value)} />
-            </div>
-          </div>
 
-          <div className="form-group">
-            <label className="form-label">Observações</label>
-            <textarea className="form-control" value={f.observacoes} onChange={(e) => setF('observacoes', e.target.value)} rows={3} />
-          </div>
-        </form>
+            <div className="form-grid-3">
+              <div className="form-group">
+                <label className="form-label">Matrícula</label>
+                <input className="form-control" value={f.matricula} onChange={(e) => setF('matricula', e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Conta de Água</label>
+                <input className="form-control" value={f.conta_agua} onChange={(e) => setF('conta_agua', e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Conta de Energia</label>
+                <input className="form-control" value={f.conta_energia} onChange={(e) => setF('conta_energia', e.target.value)} />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Observações</label>
+              <textarea className="form-control" value={f.observacoes} onChange={(e) => setF('observacoes', e.target.value)} rows={3} />
+            </div>
+          </form>
+        )}
+
+        {abaAtiva === 'inquilino' && (
+          <form onSubmit={handleSalvarInquilino}>
+            {inquilinoVinculado ? (
+              <div className="alert alert-info" style={{ marginBottom: 16 }}>
+                <strong>Inquilino atual:</strong> {inquilinoVinculado.nome} (vínculo via contrato ativo)
+              </div>
+            ) : editando ? (
+              <div className="alert alert-warning" style={{ marginBottom: 16 }}>
+                Este imóvel não tem inquilino ativo. Cadastre os dados abaixo — para vincular ao imóvel, crie um contrato em <strong>Contratos</strong>.
+              </div>
+            ) : (
+              <div className="alert alert-info" style={{ marginBottom: 16 }}>
+                Salve primeiro os dados do imóvel. Em seguida, cadastre o inquilino e crie um contrato vinculando os dois.
+              </div>
+            )}
+
+            <div className="form-group">
+              <label className="form-label">Nome completo <span className="required">*</span></label>
+              <input className="form-control" value={formInquilino.nome} onChange={(e) => setFI('nome', e.target.value)} required />
+            </div>
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">CPF / CNPJ <span className="required">*</span></label>
+                <CpfCnpjInput value={formInquilino.cpf_cnpj} onChange={(v) => setFI('cpf_cnpj', v)} required />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Telefone <span className="required">*</span></label>
+                <PhoneInput value={formInquilino.telefone} onChange={(v) => setFI('telefone', v)} required />
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">E-mail</label>
+              <input className="form-control" type="email" value={formInquilino.email} onChange={(e) => setFI('email', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Endereço</label>
+              <input className="form-control" value={formInquilino.endereco} onChange={(e) => setFI('endereco', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Observações</label>
+              <textarea className="form-control" value={formInquilino.observacoes} onChange={(e) => setFI('observacoes', e.target.value)} rows={3} />
+            </div>
+          </form>
+        )}
       </Modal>
 
       {/* Modal Histórico */}

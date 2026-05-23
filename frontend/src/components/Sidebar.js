@@ -1,22 +1,26 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutDashboard, Building2, Users, FileText, Wallet, Receipt, TrendingUp, BarChart2, Settings, LogOut } from 'lucide-react';
+import { LayoutDashboard, Building2, FileText, Wallet, Receipt, BarChart2, Settings, LogOut, Calendar } from 'lucide-react';
 
 const buildNavItems = (isAdmin) => [
   {
     section: 'Principal',
     items: [
-      { path: '/', icon: LayoutDashboard, label: 'Dashboard' }
+      { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
+      { path: '/agenda', icon: Calendar, label: 'Agenda' }
     ]
   },
   {
-    section: 'Locações',
+    section: 'Imóveis',
     items: [
-      { path: '/imoveis', icon: Building2, label: 'Imóveis' },
-      { path: '/inquilinos', icon: Users, label: 'Inquilinos' },
-      { path: '/contratos', icon: FileText, label: 'Contratos' },
-      { path: '/reajustes', icon: TrendingUp, label: 'Reajustes' }
+      { path: '/imoveis', icon: Building2, label: 'Imóveis' }
+    ]
+  },
+  {
+    section: 'Contratos',
+    items: [
+      { path: '/contratos', icon: FileText, label: 'Contratos' }
     ]
   },
   {
@@ -27,12 +31,17 @@ const buildNavItems = (isAdmin) => [
     ]
   },
   {
-    section: 'Relatórios & Adm',
+    section: 'Análise',
     items: [
-      { path: '/relatorios', icon: BarChart2, label: 'Relatórios' },
-      ...(isAdmin ? [{ path: '/usuarios', icon: Settings, label: 'Usuários' }] : [])
+      { path: '/relatorios', icon: BarChart2, label: 'Relatórios' }
     ]
-  }
+  },
+  ...(isAdmin ? [{
+    section: 'Administração',
+    items: [
+      { path: '/usuarios', icon: Settings, label: 'Usuários' }
+    ]
+  }] : [])
 ];
 
 export default function Sidebar({ collapsed, mobileOpen, onCollapse }) {
