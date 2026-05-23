@@ -5,7 +5,10 @@ ENV REACT_APP_API_URL=$REACT_APP_API_URL
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+# npm install (em vez de npm ci) tolera pequenas divergências entre
+# package.json e package-lock.json, evitando builds quebrados por
+# diferenças de versão do npm entre ambientes locais e CI.
+RUN npm install --no-audit --no-fund
 COPY . .
 # CI=false evita que warnings de ESLint quebrem o build (CRA padrão).
 RUN CI=false npm run build
