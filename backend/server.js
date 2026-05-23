@@ -545,7 +545,7 @@ app.post('/api/imoveis', authenticateToken, [
   body('endereco').trim().isLength({ min: 5 }),
   body('valor_sem_desconto').isFloat({ min: 0 }),
   body('dia_vencimento').isInt({ min: 1, max: 31 }),
-  body('status').isIn(['alugado', 'vago', 'encerrado', 'negociacao'])
+  body('status').isIn(['alugado', 'vago', 'encerrado', 'negociacao', 'manutencao'])
 ], validate, async (req, res) => {
   try {
     const {
@@ -584,7 +584,7 @@ app.put('/api/imoveis/:id', authenticateToken, [
   body('endereco').trim().isLength({ min: 5 }),
   body('valor_sem_desconto').isFloat({ min: 0 }),
   body('dia_vencimento').isInt({ min: 1, max: 31 }),
-  body('status').isIn(['alugado', 'vago', 'encerrado', 'negociacao'])
+  body('status').isIn(['alugado', 'vago', 'encerrado', 'negociacao', 'manutencao'])
 ], validate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1395,6 +1395,7 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
       imoveisAlugados: parseInt(imoveisPorStatus.rows.find(s => s.status === 'alugado')?.total || 0),
       imoveisVagos: parseInt(imoveisPorStatus.rows.find(s => s.status === 'vago')?.total || 0),
       imoveisNegociacao: parseInt(imoveisPorStatus.rows.find(s => s.status === 'negociacao')?.total || 0),
+      imoveisManutencao: parseInt(imoveisPorStatus.rows.find(s => s.status === 'manutencao')?.total || 0),
       totalReceber,
       totalRecebido,
       valorAberto: totalReceber - totalRecebido,
@@ -1698,12 +1699,38 @@ app.use((err, req, res, next) => {
 });
 
 // ============================================================
+// MIGRATIONS (rodadas no boot, idempotentes)
+// ============================================================
+async function runMigrations() {
+  try {
+    // Adiciona 'manutencao' ao CHECK de imoveis.status se ainda não estiver
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.table_constraints
+          WHERE table_name = 'imoveis' AND constraint_name = 'imoveis_status_check'
+        ) THEN
+          ALTER TABLE imoveis DROP CONSTRAINT imoveis_status_check;
+        END IF;
+        ALTER TABLE imoveis ADD CONSTRAINT imoveis_status_check
+          CHECK (status IN ('alugado', 'vago', 'encerrado', 'negociacao', 'manutencao'));
+      END $$;
+    `);
+    console.log('✅ Migrations aplicadas');
+  } catch (err) {
+    console.error('⚠️  Erro ao rodar migrations:', err.message);
+  }
+}
+
+// ============================================================
 // INICIAR SERVIDOR
 // ============================================================
 
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, async () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
   console.log(`📍 Ambiente: ${process.env.NODE_ENV || 'development'}`);
+  await runMigrations();
   sincronizarStatusVencidos();
 });
 

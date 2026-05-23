@@ -136,9 +136,10 @@ const gerarEventosDespesas = (despesas) => {
   const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
   return despesas
     .map((d) => {
-      const data = parseDate(d.data_vencimento);
+      // Tabela despesas usa "vencimento" (não data_vencimento) e não tem data_pagamento
+      const data = parseDate(d.vencimento || d.data_vencimento);
       if (!data) return null;
-      const paga = d.status === 'pago' || d.data_pagamento;
+      const paga = d.status === 'pago';
       let cor, status;
       if (paga) { cor = 'cinza'; status = 'concluido'; }
       else if (data < hoje) { cor = 'vermelho'; status = 'atrasado'; }

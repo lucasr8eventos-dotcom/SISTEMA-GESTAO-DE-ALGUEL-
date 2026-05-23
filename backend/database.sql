@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS imoveis (
     valor_com_desconto DECIMAL(10,2),
     valor_sem_desconto DECIMAL(10,2) NOT NULL,
     dia_vencimento INTEGER NOT NULL CHECK (dia_vencimento BETWEEN 1 AND 31),
-    status VARCHAR(50) NOT NULL DEFAULT 'vago' CHECK (status IN ('alugado', 'vago', 'encerrado', 'negociacao')),
+    status VARCHAR(50) NOT NULL DEFAULT 'vago' CHECK (status IN ('alugado', 'vago', 'encerrado', 'negociacao', 'manutencao')),
     numero_iptu VARCHAR(100),
     matricula VARCHAR(100),
     conta_agua VARCHAR(100),
@@ -148,6 +148,23 @@ CREATE INDEX IF NOT EXISTS idx_log_usuario ON log_atividades(usuario_id);
 CREATE INDEX IF NOT EXISTS idx_log_created ON log_atividades(created_at);
 -- Garante que não haja dois pagamentos para o mesmo imóvel no mesmo mês/ano
 CREATE UNIQUE INDEX IF NOT EXISTS ux_pagamentos_mes_ano_imovel ON pagamentos(mes, ano, imovel_id);
+
+-- ============================================================
+-- MIGRATIONS idempotentes (alterações em bancos já existentes)
+-- ============================================================
+
+-- Adiciona 'manutencao' ao CHECK de imoveis.status se ainda não estiver
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_name = 'imoveis' AND constraint_name = 'imoveis_status_check'
+    ) THEN
+        ALTER TABLE imoveis DROP CONSTRAINT imoveis_status_check;
+    END IF;
+    ALTER TABLE imoveis ADD CONSTRAINT imoveis_status_check
+        CHECK (status IN ('alugado', 'vago', 'encerrado', 'negociacao', 'manutencao'));
+END $$;
 
 -- ============================================================
 -- TRIGGERS updated_at
