@@ -88,7 +88,8 @@ export const despesasService = {
   listar: (params) => api.get('/despesas', { params }),
   criar: (dados) => api.post('/despesas', dados),
   atualizar: (id, dados) => api.put(`/despesas/${id}`, dados),
-  excluir: (id) => api.delete(`/despesas/${id}`)
+  excluir: (id) => api.delete(`/despesas/${id}`),
+  exportar: (formato, params) => api.get(`/despesas/exportar/${formato}`, { params, responseType: 'blob' })
 };
 
 // ===== REAJUSTES =====

@@ -1025,13 +1025,14 @@ app.delete('/api/pagamentos/:id', authenticateToken, authorizeAdmin, [
 // Gerar recibos de todos os pagamentos do mês (lote)
 app.get('/api/pagamentos/recibos-lote', authenticateToken, [
   query('mes').isInt({ min: 1, max: 12 }),
-  query('ano').isInt({ min: 2000, max: 2099 })
+  query('ano').isInt({ min: 2000, max: 2099 }),
+  query('inquilino_id').optional().isInt({ min: 1 })
 ], validate, async (req, res) => {
   try {
-    const { mes, ano } = req.query;
+    const { mes, ano, inquilino_id } = req.query;
     if (!mes || !ano) return res.status(400).json({ error: 'Informe mês e ano' });
 
-    const result = await pool.query(`
+    let queryStr = `
       SELECT p.*, i.codigo as imovel_codigo, i.endereco as imovel_endereco,
              inq.nome as inquilino_nome, inq.cpf_cnpj as inquilino_documento
       FROM pagamentos p
@@ -1039,11 +1040,22 @@ app.get('/api/pagamentos/recibos-lote', authenticateToken, [
       LEFT JOIN contratos c ON c.id = p.contrato_id
       LEFT JOIN inquilinos inq ON c.inquilino_id = inq.id
       WHERE p.mes=$1 AND p.ano=$2 AND p.status IN ('pago','parcial')
-      ORDER BY i.codigo
-    `, [mes, ano]);
+    `;
+    const params = [mes, ano];
+    if (inquilino_id) {
+      params.push(inquilino_id);
+      queryStr += ` AND c.inquilino_id = $${params.length}`;
+    }
+    queryStr += ' ORDER BY i.codigo';
+
+    const result = await pool.query(queryStr, params);
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Nenhum pagamento pago encontrado para este mês/ano' });
+      return res.status(404).json({
+        error: inquilino_id
+          ? 'Nenhum recibo encontrado para este inquilino neste mês/ano'
+          : 'Nenhum pagamento pago encontrado para este mês/ano'
+      });
     }
 
     const meses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
@@ -1172,20 +1184,57 @@ app.post('/api/despesas', authenticateToken, [
   body('tipo').isIn(['iptu', 'condominio', 'agua', 'energia', 'manutencao', 'seguro', 'outros']),
   body('valor').isFloat({ min: 0 }),
   body('vencimento').isDate(),
-  body('status').isIn(['pago', 'pendente', 'atrasado'])
+  body('status').isIn(['pago', 'pendente', 'atrasado']),
+  body('recorrencia').optional().isIn(['nenhuma', 'mensal', 'anual'])
 ], validate, async (req, res) => {
+  const client = await pool.connect();
   try {
-    const { imovel_id, tipo, valor, vencimento, status, descricao, observacoes } = req.body;
+    const { imovel_id, tipo, valor, vencimento, status, descricao, observacoes, recorrencia } = req.body;
 
-    const result = await pool.query(
+    await client.query('BEGIN');
+
+    // Cria primeira despesa
+    const result = await client.query(
       'INSERT INTO despesas (imovel_id, tipo, valor, vencimento, status, descricao, observacoes) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
       [imovel_id, tipo, valor, vencimento, status, descricao, observacoes]
     );
 
-    await logAtividade(req.user.id, 'criar_despesa', 'despesas', result.rows[0].id, tipo, req.ip);
-    res.status(201).json(result.rows[0]);
+    const primeira = result.rows[0];
+    let ocorrencias = [primeira];
+
+    if (recorrencia === 'mensal' || recorrencia === 'anual') {
+      // Marca série pelo id da primeira despesa
+      await client.query('UPDATE despesas SET recorrencia_id = $1 WHERE id = $1', [primeira.id]);
+
+      const dataBase = new Date(vencimento);
+      const totalGeradas = recorrencia === 'mensal' ? 11 : 1; // 12 totais (mensal) ou 2 totais (anual)
+
+      for (let i = 1; i <= totalGeradas; i++) {
+        const d = new Date(dataBase);
+        if (recorrencia === 'mensal') d.setMonth(d.getMonth() + i);
+        else d.setFullYear(d.getFullYear() + i);
+        const futuraISO = d.toISOString().split('T')[0];
+
+        const r = await client.query(
+          `INSERT INTO despesas (imovel_id, tipo, valor, vencimento, status, descricao, observacoes, recorrencia_id)
+           VALUES ($1,$2,$3,$4,'pendente',$5,$6,$7) RETURNING *`,
+          [imovel_id, tipo, valor, futuraISO, descricao, observacoes, primeira.id]
+        );
+        ocorrencias.push(r.rows[0]);
+      }
+    }
+
+    await client.query('COMMIT');
+    await logAtividade(req.user.id, 'criar_despesa', 'despesas', primeira.id,
+      recorrencia && recorrencia !== 'nenhuma' ? `${tipo}+${recorrencia}` : tipo, req.ip);
+
+    res.status(201).json({ ...primeira, ocorrencias_criadas: ocorrencias.length });
   } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Erro ao criar despesa:', error);
     res.status(500).json({ error: 'Erro no servidor' });
+  } finally {
+    client.release();
   }
 });
 
@@ -1228,6 +1277,135 @@ app.delete('/api/despesas/:id', authenticateToken, authorizeAdmin, [
     res.json({ message: 'Despesa excluída com sucesso' });
   } catch (error) {
     res.status(500).json({ error: 'Erro no servidor' });
+  }
+});
+
+// Exportar despesas (Excel ou PDF) com filtros opcionais
+const buscarDespesasParaExport = async (req) => {
+  const { status, tipo, imovel_id, mes, ano } = req.query;
+  let queryStr = `
+    SELECT d.*, i.codigo as imovel_codigo, i.endereco as imovel_endereco
+    FROM despesas d LEFT JOIN imoveis i ON d.imovel_id = i.id
+  `;
+  const params = [];
+  const conditions = [];
+  if (status) { params.push(status); conditions.push(`d.status = $${params.length}`); }
+  if (tipo) { params.push(tipo); conditions.push(`d.tipo = $${params.length}`); }
+  if (imovel_id) { params.push(imovel_id); conditions.push(`d.imovel_id = $${params.length}`); }
+  if (mes) { params.push(mes); conditions.push(`EXTRACT(MONTH FROM d.vencimento) = $${params.length}`); }
+  if (ano) { params.push(ano); conditions.push(`EXTRACT(YEAR FROM d.vencimento) = $${params.length}`); }
+  if (conditions.length > 0) queryStr += ' WHERE ' + conditions.join(' AND ');
+  queryStr += ' ORDER BY d.vencimento DESC';
+  const result = await pool.query(queryStr, params);
+  return result.rows;
+};
+
+app.get('/api/despesas/exportar/excel', authenticateToken, async (req, res) => {
+  try {
+    const rows = await buscarDespesasParaExport(req);
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Sistema Gestão Aluguéis';
+    workbook.created = new Date();
+    const ws = workbook.addWorksheet('Despesas');
+
+    ws.columns = [
+      { header: 'Imóvel', key: 'imovel_codigo', width: 12 },
+      { header: 'Endereço', key: 'imovel_endereco', width: 36 },
+      { header: 'Tipo', key: 'tipo', width: 14 },
+      { header: 'Descrição', key: 'descricao', width: 30 },
+      { header: 'Valor', key: 'valor', width: 12 },
+      { header: 'Vencimento', key: 'vencimento', width: 14 },
+      { header: 'Status', key: 'status', width: 12 }
+    ];
+    ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
+    ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+
+    rows.forEach((row) => {
+      const newRow = ws.addRow({
+        ...row,
+        vencimento: row.vencimento ? new Date(row.vencimento).toLocaleDateString('pt-BR') : ''
+      });
+      let color = 'FFFFFFFF';
+      if (row.status === 'pago') color = 'FFD4EDDA';
+      else if (row.status === 'atrasado') color = 'FFF8D7DA';
+      else if (row.status === 'pendente') color = 'FFFFF3CD';
+      newRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: color } };
+    });
+
+    // Totais
+    const total = rows.reduce((s, r) => s + parseFloat(r.valor || 0), 0);
+    ws.addRow([]);
+    const totalRow = ws.addRow({ tipo: 'TOTAL', valor: total });
+    totalRow.font = { bold: true };
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="despesas-${new Date().toISOString().split('T')[0]}.xlsx"`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error('Erro ao exportar despesas Excel:', error);
+    res.status(500).json({ error: 'Erro ao gerar Excel' });
+  }
+});
+
+app.get('/api/despesas/exportar/pdf', authenticateToken, async (req, res) => {
+  try {
+    const rows = await buscarDespesasParaExport(req);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="despesas-${new Date().toISOString().split('T')[0]}.pdf"`);
+
+    const doc = new PDFDocument({ size: 'A4', margin: 40, layout: 'landscape' });
+    doc.pipe(res);
+
+    doc.fontSize(16).font('Helvetica-Bold').text('Relatório de Despesas', { align: 'center' });
+    doc.moveDown(0.3);
+    doc.fontSize(10).font('Helvetica').text(`Gerado em ${new Date().toLocaleString('pt-BR')}`, { align: 'center' });
+    doc.moveDown();
+
+    // Cabeçalho da tabela
+    const startX = 40;
+    let y = doc.y;
+    const cols = [
+      { label: 'Imóvel', x: 0, w: 60 },
+      { label: 'Tipo', x: 60, w: 80 },
+      { label: 'Descrição', x: 140, w: 200 },
+      { label: 'Valor', x: 340, w: 80 },
+      { label: 'Vencimento', x: 420, w: 80 },
+      { label: 'Status', x: 500, w: 70 }
+    ];
+    doc.fontSize(10).font('Helvetica-Bold');
+    cols.forEach((c) => doc.text(c.label, startX + c.x, y, { width: c.w }));
+    y += 18;
+    doc.moveTo(startX, y - 4).lineTo(startX + 570, y - 4).stroke();
+
+    doc.fontSize(9).font('Helvetica');
+    let total = 0;
+    rows.forEach((r) => {
+      if (y > 540) {
+        doc.addPage();
+        y = 40;
+      }
+      const venc = r.vencimento ? new Date(r.vencimento).toLocaleDateString('pt-BR') : '—';
+      doc.text(r.imovel_codigo || '—', startX + cols[0].x, y, { width: cols[0].w });
+      doc.text(r.tipo, startX + cols[1].x, y, { width: cols[1].w });
+      doc.text((r.descricao || '—').substring(0, 50), startX + cols[2].x, y, { width: cols[2].w });
+      doc.text(`R$ ${parseFloat(r.valor).toFixed(2)}`, startX + cols[3].x, y, { width: cols[3].w });
+      doc.text(venc, startX + cols[4].x, y, { width: cols[4].w });
+      doc.text(r.status, startX + cols[5].x, y, { width: cols[5].w });
+      total += parseFloat(r.valor || 0);
+      y += 16;
+    });
+
+    y += 10;
+    doc.moveTo(startX, y).lineTo(startX + 570, y).stroke();
+    y += 6;
+    doc.fontSize(11).font('Helvetica-Bold').text(`TOTAL: R$ ${total.toFixed(2)}`, startX + 340, y);
+
+    doc.end();
+  } catch (error) {
+    console.error('Erro ao exportar despesas PDF:', error);
+    res.status(500).json({ error: 'Erro ao gerar PDF' });
   }
 });
 
@@ -1703,7 +1881,7 @@ app.use((err, req, res, next) => {
 // ============================================================
 async function runMigrations() {
   try {
-    // Adiciona 'manutencao' ao CHECK de imoveis.status se ainda não estiver
+    // Adiciona 'manutencao' ao CHECK de imoveis.status
     await pool.query(`
       DO $$
       BEGIN
@@ -1717,6 +1895,8 @@ async function runMigrations() {
           CHECK (status IN ('alugado', 'vago', 'encerrado', 'negociacao', 'manutencao'));
       END $$;
     `);
+    // Adiciona coluna recorrencia_id em despesas
+    await pool.query(`ALTER TABLE despesas ADD COLUMN IF NOT EXISTS recorrencia_id INTEGER`);
     console.log('✅ Migrations aplicadas');
   } catch (err) {
     console.error('⚠️  Erro ao rodar migrations:', err.message);

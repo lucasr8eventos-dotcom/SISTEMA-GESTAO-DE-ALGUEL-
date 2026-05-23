@@ -1,19 +1,33 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { pagamentosService, imoveisService, contratosService, downloadBlob } from '../../services/api';
+import { pagamentosService, imoveisService, contratosService, inquilinosService, downloadBlob } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
 import { MoneyInput } from '../../components/MaskedInput';
 import Pagination, { PER_PAGE } from '../../components/Pagination';
+import FilterBar from '../../components/filters/FilterBar';
+import StatusPills from '../../components/filters/StatusPills';
+import PeriodPicker from '../../components/filters/PeriodPicker';
+import SearchInput from '../../components/filters/SearchInput';
+import MetricCard from '../../components/MetricCard';
+import { EmptyState, EmptyFiltered, ErrorState } from '../../components/StateViews';
 import { formatMoeda, formatData, getMesAtual, getAnoAtual, MESES, formaPagamentoLabel } from '../../utils/format';
-import { Pencil, Trash2, Search, FileText, Banknote } from 'lucide-react';
+import { Pencil, Trash2, FileText, Banknote } from 'lucide-react';
 
 const FORM_INICIAL = {
   mes: getMesAtual(), ano: getAnoAtual(), imovel_id: '', contrato_id: '',
   valor_aluguel: '', data_vencimento: '', data_pagamento: '', valor_recebido: '',
   forma_pagamento: '', status: 'pendente', observacoes: ''
 };
+
+const STATUS_OPTIONS = [
+  { value: '', label: 'Todos', color: 'gray' },
+  { value: 'pendente', label: 'Pendente', color: 'warning' },
+  { value: 'pago', label: 'Pago', color: 'success' },
+  { value: 'atrasado', label: 'Atrasado', color: 'danger' },
+  { value: 'parcial', label: 'Parcial', color: 'info' }
+];
 
 const StatusBadge = ({ status }) => {
   const map = { pago: 'success', pendente: 'warning', atrasado: 'danger', parcial: 'info' };
@@ -23,12 +37,16 @@ const StatusBadge = ({ status }) => {
 
 export default function Pagamentos() {
   const [pagamentos, setPagamentos] = useState([]);
+  const [pagamentosAnterior, setPagamentosAnterior] = useState([]);
   const [imoveis, setImoveis] = useState([]);
   const [contratos, setContratos] = useState([]);
+  const [inquilinos, setInquilinos] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState(null);
   const [filtroMes, setFiltroMes] = useState(getMesAtual());
   const [filtroAno, setFiltroAno] = useState(getAnoAtual());
   const [filtroStatus, setFiltroStatus] = useState('');
+  const [filtroInquilino, setFiltroInquilino] = useState('');
   const [busca, setBusca] = useState('');
   const [modalAberto, setModalAberto] = useState(false);
   const [confirmExcluir, setConfirmExcluir] = useState(null);
@@ -48,6 +66,7 @@ export default function Pagamentos() {
 
   const fetchPagamentos = useCallback(async () => {
     setLoading(true);
+    setErro(null);
     try {
       const res = await pagamentosService.listar({
         mes: filtroMes || undefined,
@@ -56,23 +75,51 @@ export default function Pagamentos() {
         busca: busca || undefined
       });
       setPagamentos(res.data);
-    } catch {
-      toast.error('Erro ao carregar pagamentos');
+    } catch (err) {
+      setErro(err.response?.data?.error || 'Não foi possível carregar os pagamentos.');
     } finally {
       setLoading(false);
     }
   }, [filtroMes, filtroAno, filtroStatus, busca]);
+
+  // Pagamentos do mês anterior pra comparativo (sem afetar exibição)
+  const fetchPagamentosAnterior = useCallback(async () => {
+    if (!filtroMes || !filtroAno) { setPagamentosAnterior([]); return; }
+    const m = parseInt(filtroMes);
+    const a = parseInt(filtroAno);
+    const mesAnt = m === 1 ? 12 : m - 1;
+    const anoAnt = m === 1 ? a - 1 : a;
+    try {
+      const res = await pagamentosService.listar({ mes: mesAnt, ano: anoAnt });
+      setPagamentosAnterior(res.data);
+    } catch {
+      setPagamentosAnterior([]);
+    }
+  }, [filtroMes, filtroAno]);
 
   useEffect(() => {
     const t = setTimeout(fetchPagamentos, 300);
     return () => clearTimeout(t);
   }, [fetchPagamentos]);
 
-  useEffect(() => { setPage(1); }, [filtroMes, filtroAno, filtroStatus, busca]);
+  useEffect(() => {
+    const t = setTimeout(fetchPagamentosAnterior, 300);
+    return () => clearTimeout(t);
+  }, [fetchPagamentosAnterior]);
+
+  useEffect(() => { setPage(1); }, [filtroMes, filtroAno, filtroStatus, filtroInquilino, busca]);
 
   useEffect(() => {
-    Promise.all([imoveisService.listar(), contratosService.listar({ status: 'ativo' })])
-      .then(([im, ct]) => { setImoveis(im.data); setContratos(ct.data); })
+    Promise.all([
+      imoveisService.listar(),
+      contratosService.listar({ status: 'ativo' }),
+      inquilinosService.listar()
+    ])
+      .then(([im, ct, inq]) => {
+        setImoveis(im.data);
+        setContratos(ct.data);
+        setInquilinos(inq.data);
+      })
       .catch(() => {});
   }, []);
 
@@ -140,12 +187,17 @@ export default function Pagamentos() {
 
   const handleRecibosLote = async () => {
     if (!filtroMes || !filtroAno) {
-      toast.error('Selecione mês e ano para gerar os recibos');
+      toast.error('Selecione um período (mês e ano) para gerar os recibos');
       return;
     }
     try {
-      const res = await pagamentosService.recibosLote({ mes: filtroMes, ano: filtroAno });
-      downloadBlob(res.data, `recibos-${filtroMes}-${filtroAno}.pdf`);
+      const params = { mes: filtroMes, ano: filtroAno };
+      if (filtroInquilino) params.inquilino_id = filtroInquilino;
+      const res = await pagamentosService.recibosLote(params);
+      const nomeArquivo = filtroInquilino
+        ? `recibos-${filtroMes}-${filtroAno}-inq${filtroInquilino}.pdf`
+        : `recibos-${filtroMes}-${filtroAno}.pdf`;
+      downloadBlob(res.data, nomeArquivo);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erro ao gerar recibos');
     }
@@ -160,51 +212,95 @@ export default function Pagamentos() {
 
   const setF = (campo, valor) => setForm(prev => {
     const next = { ...prev, [campo]: valor };
-
     if (campo === 'imovel_id') {
       next.contrato_id = '';
       next.valor_aluguel = '';
-      const mes = prev.mes || getMesAtual();
-      const ano = prev.ano || getAnoAtual();
-      next.data_vencimento = calcVencimento(valor, mes, ano);
+      next.data_vencimento = calcVencimento(valor, prev.mes || getMesAtual(), prev.ano || getAnoAtual());
     }
-
     if (campo === 'contrato_id' && valor) {
       const contrato = contratos.find(c => String(c.id) === String(valor));
       if (contrato) {
         next.valor_aluguel = contrato.valor || prev.valor_aluguel;
-        const mes = prev.mes || getMesAtual();
-        const ano = prev.ano || getAnoAtual();
-        next.data_vencimento = calcVencimento(contrato.imovel_id, mes, ano);
+        next.data_vencimento = calcVencimento(contrato.imovel_id, prev.mes || getMesAtual(), prev.ano || getAnoAtual());
       }
     }
-
     if ((campo === 'mes' || campo === 'ano') && prev.imovel_id) {
       const mes = campo === 'mes' ? valor : prev.mes;
       const ano = campo === 'ano' ? valor : prev.ano;
       next.data_vencimento = calcVencimento(prev.imovel_id, mes, ano);
     }
-
     return next;
   });
 
-  const paginatedPagamentos = pagamentos.slice((page - 1) * PER_PAGE, page * PER_PAGE);
-  const totalReceber = pagamentos.reduce((s, p) => s + parseFloat(p.valor_aluguel || 0), 0);
-  const totalRecebido = pagamentos
-    .filter(p => p.status === 'pago' || p.status === 'parcial')
-    .reduce((s, p) => {
-      if (p.status === 'pago') return s + parseFloat(p.valor_recebido || p.valor_aluguel || 0);
-      return s + parseFloat(p.valor_recebido || 0);
-    }, 0);
+  // ===== Filtro por inquilino (cliente) =====
+  const pagamentosFiltrados = useMemo(() => {
+    if (!filtroInquilino) return pagamentos;
+    return pagamentos.filter((p) => {
+      const c = contratos.find((ct) => ct.id === p.contrato_id);
+      return c && String(c.inquilino_id) === String(filtroInquilino);
+    });
+  }, [pagamentos, filtroInquilino, contratos]);
 
-  const anos = Array.from({ length: 5 }, (_, i) => getAnoAtual() - 2 + i);
+  // ===== Stats =====
+  const stats = useMemo(() => {
+    const counts = { pago: 0, pendente: 0, atrasado: 0, parcial: 0 };
+    let totalReceber = 0, totalRecebido = 0;
+    pagamentosFiltrados.forEach((p) => {
+      counts[p.status] = (counts[p.status] || 0) + 1;
+      totalReceber += parseFloat(p.valor_aluguel || 0);
+      if (p.status === 'pago') totalRecebido += parseFloat(p.valor_recebido || p.valor_aluguel || 0);
+      else if (p.status === 'parcial') totalRecebido += parseFloat(p.valor_recebido || 0);
+    });
+    const totalParcial = pagamentosFiltrados
+      .filter((p) => p.status === 'parcial')
+      .reduce((s, p) => s + parseFloat(p.valor_aluguel || 0), 0);
+    const pagoParcial = pagamentosFiltrados
+      .filter((p) => p.status === 'parcial')
+      .reduce((s, p) => s + parseFloat(p.valor_recebido || 0), 0);
+    return { counts, totalReceber, totalRecebido, totalParcial, pagoParcial };
+  }, [pagamentosFiltrados]);
 
-  const rowStyle = (status) => {
-    if (status === 'pago') return { background: '#f0fff4' };
-    if (status === 'atrasado') return { background: '#fff5f5' };
-    if (status === 'parcial') return { background: '#ebf8ff' };
-    return {};
+  // ===== Comparativo com mês anterior =====
+  const variacoes = useMemo(() => {
+    const recAnt = pagamentosAnterior
+      .filter((p) => p.status === 'pago' || p.status === 'parcial')
+      .reduce((s, p) => s + parseFloat(p.valor_recebido || p.valor_aluguel || 0), 0);
+    const totAnt = pagamentosAnterior.reduce((s, p) => s + parseFloat(p.valor_aluguel || 0), 0);
+    const atrAnt = pagamentosAnterior.filter((p) => p.status === 'atrasado').length;
+    const pct = (atual, anterior) => {
+      if (!anterior) return null;
+      return ((atual - anterior) / anterior) * 100;
+    };
+    return {
+      receber: pct(stats.totalReceber, totAnt),
+      recebido: pct(stats.totalRecebido, recAnt),
+      atrasados: pct(stats.counts.atrasado, atrAnt)
+    };
+  }, [pagamentosAnterior, stats]);
+
+  // ===== Pagination =====
+  const paginatedPagamentos = pagamentosFiltrados.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+
+  const rowClass = (status) => {
+    if (status === 'pago') return 'row-success';
+    if (status === 'atrasado') return 'row-danger';
+    if (status === 'parcial') return 'row-warn';
+    return '';
   };
+
+  const hasFiltrosAtivos =
+    !!filtroStatus || !!filtroInquilino || !!busca ||
+    !!(filtroMes && filtroAno && (filtroMes !== getMesAtual() || filtroAno !== getAnoAtual()));
+
+  const limparFiltros = () => {
+    setFiltroMes(getMesAtual());
+    setFiltroAno(getAnoAtual());
+    setFiltroStatus('');
+    setFiltroInquilino('');
+    setBusca('');
+  };
+
+  const hasDadosCadastrados = pagamentos.length > 0 || !!filtroStatus || !!busca; // heurística: se NÃO tem nada no mês atual sem filtros, pode ser que não tem cadastrados
 
   return (
     <div>
@@ -214,57 +310,117 @@ export default function Pagamentos() {
           <p>Controle mensal de aluguéis</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-ghost" onClick={handleRecibosLote} title="Gerar PDF de todos os recibos pagos do mês">Recibos do Mês</button>
+          <button
+            className="btn btn-ghost"
+            onClick={handleRecibosLote}
+            title={filtroInquilino ? 'Gerar PDF dos recibos do inquilino no mês' : 'Gerar PDF de todos os recibos pagos do mês'}
+            disabled={!filtroMes || !filtroAno}
+          >
+            <FileText size={14} /> {filtroInquilino ? 'Recibos do Inquilino' : 'Recibos do Mês'}
+          </button>
           <button className="btn btn-primary" onClick={abrirNovo}>+ Registrar Pagamento</button>
         </div>
       </div>
 
-      <div className="filters-row">
-        <select className="form-control filter-select" value={filtroMes} onChange={(e) => setFiltroMes(e.target.value)}>
-          <option value="">Todos os meses</option>
-          {MESES.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
-        </select>
-        <select className="form-control filter-select" value={filtroAno} onChange={(e) => setFiltroAno(e.target.value)}>
-          <option value="">Todos os anos</option>
-          {anos.map(a => <option key={a} value={a}>{a}</option>)}
-        </select>
-        <select className="form-control filter-select" value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value)}>
-          <option value="">Todos os status</option>
-          <option value="pago">Pago</option>
-          <option value="pendente">Pendente</option>
-          <option value="atrasado">Atrasado</option>
-          <option value="parcial">Parcial</option>
-        </select>
-        <div className="search-input-wrap">
-          <span className="search-icon"><Search size={16} /></span>
-          <input className="form-control" placeholder="Buscar imóvel ou inquilino..." value={busca} onChange={(e) => setBusca(e.target.value)} />
-        </div>
+      {/* Cards de resumo */}
+      <div className="metrics-grid">
+        <MetricCard
+          label="Total a Receber"
+          value={formatMoeda(stats.totalReceber)}
+          color="var(--info)"
+          variation={variacoes.receber}
+          active={!filtroStatus}
+          onClick={() => setFiltroStatus('')}
+        />
+        <MetricCard
+          label="Total Recebido"
+          value={formatMoeda(stats.totalRecebido)}
+          color="var(--success)"
+          variation={variacoes.recebido}
+          active={filtroStatus === 'pago'}
+          onClick={() => setFiltroStatus(filtroStatus === 'pago' ? '' : 'pago')}
+        />
+        <MetricCard
+          label="Em Aberto"
+          value={formatMoeda(stats.totalReceber - stats.totalRecebido)}
+          color="var(--danger)"
+          active={filtroStatus === 'pendente'}
+          onClick={() => setFiltroStatus(filtroStatus === 'pendente' ? '' : 'pendente')}
+        />
+        <MetricCard
+          label="Atrasados"
+          value={stats.counts.atrasado}
+          color="var(--danger)"
+          variation={variacoes.atrasados}
+          active={filtroStatus === 'atrasado'}
+          onClick={() => setFiltroStatus(filtroStatus === 'atrasado' ? '' : 'atrasado')}
+        />
+        {stats.counts.parcial > 0 && (
+          <MetricCard
+            label={`Parcial (${stats.counts.parcial})`}
+            value={formatMoeda(stats.pagoParcial)}
+            color="var(--info)"
+            progress={{ pago: stats.pagoParcial, total: stats.totalParcial }}
+            hint={`de ${formatMoeda(stats.totalParcial)} totais`}
+            active={filtroStatus === 'parcial'}
+            onClick={() => setFiltroStatus(filtroStatus === 'parcial' ? '' : 'parcial')}
+          />
+        )}
       </div>
 
-      {/* Totalizadores */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        {[
-          { label: 'Total a Receber', value: formatMoeda(totalReceber), color: 'var(--info)' },
-          { label: 'Total Recebido', value: formatMoeda(totalRecebido), color: 'var(--success)' },
-          { label: 'Em Aberto', value: formatMoeda(totalReceber - totalRecebido), color: 'var(--danger)' },
-          { label: 'Atrasados', value: pagamentos.filter(p => p.status === 'atrasado').length, color: 'var(--danger)' }
-        ].map(item => (
-          <div key={item.label} style={{ background: 'white', border: '1px solid var(--gray-200)', borderRadius: 'var(--radius)', padding: '10px 18px', borderTop: `3px solid ${item.color}` }}>
-            <div style={{ fontSize: 18, fontWeight: 700, color: item.color }}>{item.value}</div>
-            <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>{item.label}</div>
-          </div>
-        ))}
-      </div>
+      {/* Filtros */}
+      <FilterBar hasActive={hasFiltrosAtivos} onClear={limparFiltros}>
+        <PeriodPicker
+          mes={filtroMes}
+          ano={filtroAno}
+          onChange={({ mes, ano }) => { setFiltroMes(mes); setFiltroAno(ano); }}
+        />
+        <SearchInput
+          value={busca}
+          onChange={setBusca}
+          placeholder="Buscar imóvel ou inquilino..."
+          label="Busca"
+        />
+        <div className="filter-field">
+          <label className="filter-label">Inquilino</label>
+          <select className="form-control" value={filtroInquilino} onChange={(e) => setFiltroInquilino(e.target.value)}>
+            <option value="">Todos</option>
+            {inquilinos.map((inq) => <option key={inq.id} value={inq.id}>{inq.nome}</option>)}
+          </select>
+        </div>
+        <div className="filter-field filter-field-full">
+          <label className="filter-label">Status</label>
+          <StatusPills
+            options={STATUS_OPTIONS}
+            value={filtroStatus}
+            onChange={setFiltroStatus}
+            counts={stats.counts}
+          />
+        </div>
+      </FilterBar>
+
+      {/* Erro */}
+      {erro && <ErrorState message={erro} onRetry={fetchPagamentos} />}
 
       <div className="card">
         <div className="table-wrapper">
           {loading ? (
             <div className="loading-spinner"><div className="spinner" /></div>
-          ) : pagamentos.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-icon"><Banknote size={48} /></div>
-              <h3>Nenhum pagamento encontrado</h3>
-            </div>
+          ) : pagamentosFiltrados.length === 0 ? (
+            hasFiltrosAtivos || hasDadosCadastrados ? (
+              <EmptyFiltered onClear={limparFiltros} icon={<Banknote size={48} />} />
+            ) : (
+              <EmptyState
+                icon={<Banknote size={48} />}
+                title="Nenhum pagamento cadastrado"
+                message="Comece registrando o primeiro pagamento do mês."
+                action={
+                  <button className="btn btn-primary" onClick={abrirNovo}>
+                    + Registrar primeiro pagamento
+                  </button>
+                }
+              />
+            )
           ) : (
             <table>
               <thead>
@@ -283,7 +439,7 @@ export default function Pagamentos() {
               </thead>
               <tbody>
                 {paginatedPagamentos.map((p) => (
-                  <tr key={p.id} style={rowStyle(p.status)}>
+                  <tr key={p.id} className={rowClass(p.status)}>
                     <td>{p.mes}/{p.ano}</td>
                     <td>
                       <strong>{p.imovel_codigo}</strong>
@@ -298,7 +454,7 @@ export default function Pagamentos() {
                     <td><StatusBadge status={p.status} /></td>
                     <td>
                       <div className="table-actions">
-                        {p.status === 'pago' && (
+                        {(p.status === 'pago' || p.status === 'parcial') && (
                           <button className="btn btn-ghost btn-sm btn-icon" title="Gerar Recibo" onClick={() => handleRecibo(p.id)}><FileText size={14} /></button>
                         )}
                         <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => abrirEditar(p)}><Pencil size={14} /></button>
@@ -313,7 +469,7 @@ export default function Pagamentos() {
             </table>
           )}
         </div>
-        <Pagination total={pagamentos.length} page={page} perPage={PER_PAGE} onChange={setPage} />
+        <Pagination total={pagamentosFiltrados.length} page={page} perPage={PER_PAGE} onChange={setPage} />
       </div>
 
       <Modal
@@ -341,7 +497,7 @@ export default function Pagamentos() {
             <div className="form-group">
               <label className="form-label">Ano <span className="required">*</span></label>
               <select className="form-control" value={form.ano} onChange={(e) => setF('ano', e.target.value)} required>
-                {anos.map(a => <option key={a} value={a}>{a}</option>)}
+                {Array.from({ length: 5 }, (_, i) => getAnoAtual() - 2 + i).map(a => <option key={a} value={a}>{a}</option>)}
               </select>
             </div>
             <div className="form-group">

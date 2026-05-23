@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS despesas (
     status VARCHAR(50) NOT NULL DEFAULT 'pendente' CHECK (status IN ('pago', 'pendente', 'atrasado')),
     descricao VARCHAR(255),
     observacoes TEXT,
+    recorrencia_id INTEGER, -- agrupa despesas criadas em série
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -165,6 +166,9 @@ BEGIN
     ALTER TABLE imoveis ADD CONSTRAINT imoveis_status_check
         CHECK (status IN ('alugado', 'vago', 'encerrado', 'negociacao', 'manutencao'));
 END $$;
+
+-- Adiciona coluna recorrencia_id em despesas (para agrupar despesas geradas em série)
+ALTER TABLE despesas ADD COLUMN IF NOT EXISTS recorrencia_id INTEGER;
 
 -- ============================================================
 -- TRIGGERS updated_at
