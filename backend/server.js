@@ -2000,6 +2000,21 @@ async function runMigrations() {
     `);
     // Adiciona coluna recorrencia_id em despesas
     await pool.query(`ALTER TABLE despesas ADD COLUMN IF NOT EXISTS recorrencia_id INTEGER`);
+    // Índice para busca de série de despesas
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_despesas_recorrencia ON despesas(recorrencia_id)`);
+    // FK de integridade referencial para recorrencia_id (bancos existentes)
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.table_constraints
+          WHERE table_name = 'despesas' AND constraint_name = 'fk_despesas_recorrencia'
+        ) THEN
+          ALTER TABLE despesas ADD CONSTRAINT fk_despesas_recorrencia
+            FOREIGN KEY (recorrencia_id) REFERENCES despesas(id) ON DELETE SET NULL;
+        END IF;
+      END $$;
+    `);
     console.log('✅ Migrations aplicadas');
   } catch (err) {
     console.error('⚠️  Erro ao rodar migrations:', err.message);

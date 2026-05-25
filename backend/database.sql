@@ -183,9 +183,6 @@ BEGIN
   END IF;
 END $$;
 
--- Índice para recorrencia_id (busca de série)
-CREATE INDEX IF NOT EXISTS idx_despesas_recorrencia ON despesas(recorrencia_id);
-
 -- ============================================================
 -- TRIGGERS updated_at
 -- ============================================================

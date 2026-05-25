@@ -47,7 +47,7 @@ export function ConfirmDialog({ isOpen, onClose, onConfirm, title, message, conf
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
           {extraAction && (
-            <button className={`btn ${extraAction.className || 'btn-danger'}`} onClick={() => { extraAction.onClick(); onClose(); }}>
+            <button className={`btn ${extraAction.className || 'btn-danger'}`} onClick={extraAction.onClick}>
               {extraAction.label}
             </button>
           )}
