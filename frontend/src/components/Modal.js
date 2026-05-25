@@ -32,7 +32,7 @@ export default function Modal({ isOpen, onClose, title, children, footer, size =
   );
 }
 
-export function ConfirmDialog({ isOpen, onClose, onConfirm, title, message, confirmLabel = 'Excluir', confirmClass = 'btn-danger' }) {
+export function ConfirmDialog({ isOpen, onClose, onConfirm, title, message, confirmLabel = 'Excluir', confirmClass = 'btn-danger', extraAction }) {
   if (!isOpen) return null;
   return (
     <div className="modal-overlay">
@@ -46,6 +46,11 @@ export function ConfirmDialog({ isOpen, onClose, onConfirm, title, message, conf
         </div>
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+          {extraAction && (
+            <button className={`btn ${extraAction.className || 'btn-danger'}`} onClick={extraAction.onClick}>
+              {extraAction.label}
+            </button>
+          )}
           <button className={`btn ${confirmClass}`} onClick={onConfirm}>{confirmLabel}</button>
         </div>
       </div>

@@ -55,6 +55,7 @@ export default function Contratos() {
   const [formReajuste, setFormReajuste] = useState(FORM_REAJUSTE_INICIAL);
   const [editandoReajuste, setEditandoReajuste] = useState(null);
   const [salvandoReajuste, setSalvandoReajuste] = useState(false);
+  const [confirmExcluirReajuste, setConfirmExcluirReajuste] = useState(null);
 
   const toast = useToast();
   const { isAdmin } = useAuth();
@@ -306,11 +307,12 @@ export default function Contratos() {
     }
   };
 
-  const excluirReajuste = async (r) => {
-    if (!window.confirm(`Excluir reajuste de ${formatData(r.data_proximo)}?`)) return;
+  const excluirReajuste = async () => {
+    if (!confirmExcluirReajuste) return;
     try {
-      await reajustesService.excluir(r.id);
+      await reajustesService.excluir(confirmExcluirReajuste.id);
       toast.success('Reajuste excluído');
+      setConfirmExcluirReajuste(null);
       carregarReajustesContrato(editando);
       fetchTodos();
     } catch (err) {
@@ -458,7 +460,7 @@ export default function Contratos() {
                         <div className="table-actions">
                           {c.arquivo_pdf && (
                             <a
-                              href={`${BACKEND_ORIGIN}/uploads/${c.arquivo_pdf}`}
+                              href={`${BACKEND_ORIGIN}/api/uploads/${c.arquivo_pdf}`}
                               target="_blank"
                               rel="noreferrer"
                               className="btn btn-ghost btn-sm btn-icon"
@@ -623,7 +625,7 @@ export default function Contratos() {
                             <td>
                               <div className="table-actions">
                                 <button type="button" className="btn btn-ghost btn-sm btn-icon" onClick={() => editarReajuste(r)}><Pencil size={14} /></button>
-                                {isAdmin && <button type="button" className="btn btn-outline-danger btn-sm btn-icon" onClick={() => excluirReajuste(r)}><Trash2 size={14} /></button>}
+                                {isAdmin && <button type="button" className="btn btn-outline-danger btn-sm btn-icon" onClick={() => setConfirmExcluirReajuste(r)}><Trash2 size={14} /></button>}
                               </div>
                             </td>
                           </tr>
@@ -703,6 +705,14 @@ export default function Contratos() {
         onConfirm={handleExcluir}
         title="Excluir Contrato"
         message="Tem certeza que deseja excluir este contrato?"
+      />
+
+      <ConfirmDialog
+        isOpen={!!confirmExcluirReajuste}
+        onClose={() => setConfirmExcluirReajuste(null)}
+        onConfirm={excluirReajuste}
+        title="Excluir Reajuste"
+        message={confirmExcluirReajuste ? `Excluir reajuste previsto para ${formatData(confirmExcluirReajuste.data_proximo)}?` : ''}
       />
     </div>
   );

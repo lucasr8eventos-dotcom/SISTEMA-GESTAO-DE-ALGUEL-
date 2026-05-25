@@ -42,7 +42,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Rate limit geral
 app.use('/api/', rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 300,
   message: { error: 'Muitas requisições. Tente novamente em 15 minutos.' }
 }));
 
@@ -112,21 +112,20 @@ const upload = multer({
   }
 });
 
-app.use('/uploads', (req, res, next) => {
-  res.setHeader('Content-Disposition', 'attachment');
-  next();
-}, express.static(uploadDir));
-
 // ============================================================
 // AUTENTICAÇÃO E AUTORIZAÇÃO
 // ============================================================
 
 const crypto = require('crypto');
+if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32)) {
+  console.error('❌ FATAL: JWT_SECRET não definido ou muito curto em produção. Defina JWT_SECRET no ambiente.');
+  process.exit(1);
+}
 const JWT_SECRET = (process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32)
   ? process.env.JWT_SECRET
   : (() => {
       const generated = crypto.randomBytes(32).toString('hex');
-      console.warn('⚠️  JWT_SECRET não definido ou muito curto. Usando secret gerado automaticamente. Defina JWT_SECRET no Railway para persistência entre reinícios.');
+      console.warn('⚠️  JWT_SECRET não definido. Usando secret temporário — usuários serão deslogados a cada reinício do servidor. Defina JWT_SECRET no .env para desenvolvimento estável.');
       return generated;
     })();
 
@@ -156,6 +155,17 @@ const validate = (req, res, next) => {
   }
   next();
 };
+
+// Rota autenticada para servir arquivos de upload (PDFs de contratos)
+app.get('/api/uploads/:filename', authenticateToken, (req, res) => {
+  const filename = path.basename(req.params.filename); // evita path traversal
+  const filePath = path.join(uploadDir, filename);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'Arquivo não encontrado' });
+  }
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.sendFile(path.resolve(filePath));
+});
 
 // ============================================================
 // LOG DE ATIVIDADES
@@ -205,9 +215,23 @@ const existeContratoSobreposto = async (imovelId, dataInicio, dataFim, excluirId
 // Executada no startup e periodicamente.
 const sincronizarStatusVencidos = async () => {
   try {
+    // Marca contratos vencidos e libera imóveis que não têm outro contrato ativo
     const c = await pool.query(
-      "UPDATE contratos SET status='vencido' WHERE status='ativo' AND data_fim < CURRENT_DATE RETURNING id"
+      "UPDATE contratos SET status='vencido' WHERE status='ativo' AND data_fim < CURRENT_DATE RETURNING id, imovel_id"
     );
+    if (c.rowCount > 0) {
+      // Para cada imóvel afetado, verifica se ainda existe contrato ativo antes de marcar como vago
+      const imovelIds = [...new Set(c.rows.map(r => r.imovel_id))];
+      for (const imovelId of imovelIds) {
+        const ainda = await pool.query(
+          "SELECT id FROM contratos WHERE imovel_id=$1 AND status='ativo' LIMIT 1",
+          [imovelId]
+        );
+        if (ainda.rows.length === 0) {
+          await pool.query("UPDATE imoveis SET status='vago' WHERE id=$1 AND status='alugado'", [imovelId]);
+        }
+      }
+    }
     const p = await pool.query(
       "UPDATE pagamentos SET status='atrasado' WHERE status='pendente' AND data_vencimento < CURRENT_DATE RETURNING id"
     );
@@ -792,7 +816,17 @@ app.put('/api/contratos/:id', authenticateToken, upload.single('arquivo_pdf'), [
     const contrato = await pool.query('SELECT * FROM contratos WHERE id=$1', [id]);
     if (contrato.rows.length === 0) return res.status(404).json({ error: 'Contrato não encontrado' });
 
-    const arquivo_pdf = req.file ? req.file.filename : contrato.rows[0].arquivo_pdf;
+    // Se novo PDF foi enviado, apaga o arquivo antigo do disco
+    const pdfAntigo = contrato.rows[0].arquivo_pdf;
+    const arquivo_pdf = req.file ? req.file.filename : pdfAntigo;
+    if (req.file && pdfAntigo) {
+      const caminhoAntigo = path.join(uploadDir, pdfAntigo);
+      if (fs.existsSync(caminhoAntigo)) {
+        fs.unlink(caminhoAntigo, (err) => {
+          if (err) console.warn(`Aviso: não foi possível deletar PDF antigo ${pdfAntigo}:`, err.message);
+        });
+      }
+    }
 
     if (new Date(data_fim) <= new Date(data_inicio)) {
       return res.status(400).json({ error: 'A data de fim deve ser posterior à data de início' });
@@ -856,11 +890,31 @@ app.delete('/api/contratos/:id', authenticateToken, authorizeAdmin, [
   try {
     const { id } = req.params;
 
-    const contratoRes = await pool.query('SELECT id, imovel_id, status FROM contratos WHERE id=$1', [id]);
+    const contratoRes = await pool.query('SELECT id, imovel_id, status, arquivo_pdf FROM contratos WHERE id=$1', [id]);
     if (contratoRes.rows.length === 0) return res.status(404).json({ error: 'Contrato não encontrado' });
     const contrato = contratoRes.rows[0];
 
+    // Bloqueia exclusão se existem pagamentos vinculados (integridade contábil)
+    const pagamentosVinculados = await pool.query(
+      'SELECT id FROM pagamentos WHERE contrato_id=$1 LIMIT 1', [id]
+    );
+    if (pagamentosVinculados.rows.length > 0) {
+      return res.status(400).json({
+        error: 'Este contrato possui pagamentos registrados e não pode ser excluído. Encerre o contrato em vez de excluir.'
+      });
+    }
+
     await pool.query('DELETE FROM contratos WHERE id=$1', [id]);
+
+    // Remove PDF do contrato do disco se existir
+    if (contrato.arquivo_pdf) {
+      const caminhoPdf = path.join(uploadDir, contrato.arquivo_pdf);
+      if (fs.existsSync(caminhoPdf)) {
+        fs.unlink(caminhoPdf, (err) => {
+          if (err) console.warn(`Aviso: não foi possível deletar PDF do contrato ${id}:`, err.message);
+        });
+      }
+    }
 
     if (contrato.status === 'ativo') {
       const outrosAtivos = await pool.query(
@@ -1266,15 +1320,37 @@ app.put('/api/despesas/:id', authenticateToken, [
 });
 
 app.delete('/api/despesas/:id', authenticateToken, authorizeAdmin, [
-  param('id').isInt({ min: 1 })
+  param('id').isInt({ min: 1 }),
+  query('excluir_serie').optional().isBoolean()
 ], validate, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('DELETE FROM despesas WHERE id=$1 RETURNING id', [id]);
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Despesa não encontrada' });
+    const excluirSerie = req.query.excluir_serie === 'true';
 
+    const despesa = await pool.query('SELECT id, recorrencia_id FROM despesas WHERE id=$1', [id]);
+    if (despesa.rows.length === 0) return res.status(404).json({ error: 'Despesa não encontrada' });
+
+    const recorrenciaId = despesa.rows[0].recorrencia_id;
+
+    if (excluirSerie && recorrenciaId) {
+      // Exclui todas as despesas da mesma série (incluindo a raiz)
+      await pool.query(
+        'DELETE FROM despesas WHERE recorrencia_id=$1 OR id=$1',
+        [recorrenciaId]
+      );
+      await logAtividade(req.user.id, 'excluir_despesa_serie', 'despesas', parseInt(id), `serie:${recorrenciaId}`, req.ip);
+      return res.json({ message: 'Série de despesas excluída com sucesso' });
+    }
+
+    await pool.query('DELETE FROM despesas WHERE id=$1', [id]);
     await logAtividade(req.user.id, 'excluir_despesa', 'despesas', parseInt(id), null, req.ip);
-    res.json({ message: 'Despesa excluída com sucesso' });
+
+    // Informa ao frontend se a despesa fazia parte de uma série
+    res.json({
+      message: 'Despesa excluída com sucesso',
+      tinha_serie: !!recorrenciaId,
+      recorrencia_id: recorrenciaId || null
+    });
   } catch (error) {
     res.status(500).json({ error: 'Erro no servidor' });
   }
@@ -1497,6 +1573,18 @@ app.put('/api/reajustes/:id', authenticateToken, [
 
     if (result.rows.length === 0) return res.status(404).json({ error: 'Reajuste não encontrado' });
 
+    // Ao marcar reajuste como 'aplicado', atualiza o valor do contrato e do imóvel
+    if (status === 'aplicado' && result.rows[0].contrato_id) {
+      await pool.query(
+        'UPDATE contratos SET valor=$1, updated_at=NOW() WHERE id=$2',
+        [novoValorCalc, result.rows[0].contrato_id]
+      );
+      await pool.query(
+        'UPDATE imoveis SET valor_sem_desconto=$1, updated_at=NOW() WHERE id=$2',
+        [novoValorCalc, result.rows[0].imovel_id]
+      );
+    }
+
     await logAtividade(req.user.id, 'editar_reajuste', 'reajustes', parseInt(id), null, req.ip);
     res.json(result.rows[0]);
   } catch (error) {
@@ -1576,7 +1664,7 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
       imoveisManutencao: parseInt(imoveisPorStatus.rows.find(s => s.status === 'manutencao')?.total || 0),
       totalReceber,
       totalRecebido,
-      valorAberto: totalReceber - totalRecebido,
+      valorAberto: Math.max(0, totalReceber - totalRecebido),
       alugueisAtrasados: parseInt(pagamentosMes.rows[0]?.total_atrasados || 0),
       despesasMes: parseFloat(despesasMes.rows[0]?.total || 0),
       contratosVencendo: parseInt(contratosVencendo.rows[0].total),
@@ -1793,7 +1881,8 @@ app.get('/api/relatorios/exportar/pdf', authenticateToken, async (req, res) => {
 
     if (tipo === 'mensal' && mes && ano) {
       const result = await pool.query(`
-        SELECT i.codigo, i.endereco, inq.nome as inquilino, p.valor_aluguel, p.status
+        SELECT i.codigo, i.endereco, inq.nome as inquilino,
+               p.valor_aluguel, p.data_vencimento, p.status
         FROM pagamentos p
         LEFT JOIN imoveis i ON p.imovel_id = i.id
         LEFT JOIN contratos c ON c.id = p.contrato_id
@@ -1807,15 +1896,29 @@ app.get('/api/relatorios/exportar/pdf', authenticateToken, async (req, res) => {
       rows = result.rows;
       titulo = 'Relatório de Inadimplência';
     } else if (tipo === 'imoveis-vagos') {
-      const result = await pool.query("SELECT * FROM imoveis WHERE status IN ('vago','negociacao') ORDER BY codigo");
+      const result = await pool.query(
+        "SELECT codigo, tipo, endereco, valor_sem_desconto, dia_vencimento, status FROM imoveis WHERE status IN ('vago','negociacao') ORDER BY codigo"
+      );
       rows = result.rows;
       titulo = 'Relatório de Imóveis Vagos';
+    } else {
+      return res.status(400).json({ error: 'Tipo de relatório inválido. Use: mensal, inadimplencia ou imoveis-vagos' });
+    }
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Nenhum dado encontrado para os filtros informados' });
     }
 
     const doc = new PDFDocument({ size: 'A4', margin: 40, layout: 'landscape' });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=relatorio-${tipo}-${Date.now()}.pdf`);
     doc.pipe(res);
+
+    // Mapeamento explícito de colunas por tipo de relatório
+    const colunasMensal = ['codigo', 'endereco', 'inquilino', 'valor_aluguel', 'data_vencimento', 'status'];
+    const colunasInad = ['imovel_codigo', 'imovel_endereco', 'inquilino_nome', 'mes', 'ano', 'valor_aluguel', 'dias_atraso'];
+    const colunasVagos = ['codigo', 'tipo', 'endereco', 'valor_sem_desconto', 'dia_vencimento', 'status'];
+    const colunas = tipo === 'mensal' ? colunasMensal : tipo === 'inadimplencia' ? colunasInad : colunasVagos;
 
     doc.fontSize(16).fillColor('#1e3a5f').text(titulo, { align: 'center' });
     doc.fontSize(10).fillColor('#666').text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')}`, { align: 'center' });
@@ -1824,7 +1927,7 @@ app.get('/api/relatorios/exportar/pdf', authenticateToken, async (req, res) => {
     rows.forEach((row, i) => {
       if (i > 0 && i % 25 === 0) doc.addPage();
       doc.fontSize(9).fillColor('#333');
-      const line = Object.values(row).slice(0, 6).map(v => String(v || '')).join(' | ');
+      const line = colunas.map(col => String(row[col] ?? '')).join(' | ');
       doc.text(line, 40, doc.y, { width: 760 });
     });
 
@@ -1897,6 +2000,21 @@ async function runMigrations() {
     `);
     // Adiciona coluna recorrencia_id em despesas
     await pool.query(`ALTER TABLE despesas ADD COLUMN IF NOT EXISTS recorrencia_id INTEGER`);
+    // Índice para busca de série de despesas
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_despesas_recorrencia ON despesas(recorrencia_id)`);
+    // FK de integridade referencial para recorrencia_id (bancos existentes)
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.table_constraints
+          WHERE table_name = 'despesas' AND constraint_name = 'fk_despesas_recorrencia'
+        ) THEN
+          ALTER TABLE despesas ADD CONSTRAINT fk_despesas_recorrencia
+            FOREIGN KEY (recorrencia_id) REFERENCES despesas(id) ON DELETE SET NULL;
+        END IF;
+      END $$;
+    `);
     console.log('✅ Migrations aplicadas');
   } catch (err) {
     console.error('⚠️  Erro ao rodar migrations:', err.message);
