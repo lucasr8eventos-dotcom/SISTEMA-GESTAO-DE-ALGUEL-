@@ -31,7 +31,7 @@ services:
       DB_NAME: gestao_alugueis
       DB_PASSWORD: postgres
       DB_PORT: 5432
-      JWT_SECRET: ${JWT_SECRET:-troque_este_segredo_em_producao_123456789}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET deve ser definido no arquivo .env}
       NODE_ENV: ${NODE_ENV:-production}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
     ports:

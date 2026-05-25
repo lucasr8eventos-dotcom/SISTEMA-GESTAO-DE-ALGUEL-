@@ -2,8 +2,8 @@ import axios from 'axios';
 
 const API_BASE = process.env.REACT_APP_API_URL || '/api';
 
-// Origem do backend (sem /api no final) — usada para montar URLs de arquivos
-// servidos diretamente pelo backend, como /uploads/<arquivo>.
+// Origem do backend (sem /api no final) — usada para montar URLs autenticadas de arquivos
+// ex: /api/uploads/<arquivo> (rota protegida por JWT no backend).
 export const BACKEND_ORIGIN = API_BASE.replace(/\/api\/?$/, '');
 
 const api = axios.create({
@@ -88,7 +88,7 @@ export const despesasService = {
   listar: (params) => api.get('/despesas', { params }),
   criar: (dados) => api.post('/despesas', dados),
   atualizar: (id, dados) => api.put(`/despesas/${id}`, dados),
-  excluir: (id) => api.delete(`/despesas/${id}`),
+  excluir: (id, params) => api.delete(`/despesas/${id}`, { params }),
   exportar: (formato, params) => api.get(`/despesas/exportar/${formato}`, { params, responseType: 'blob' })
 };
 

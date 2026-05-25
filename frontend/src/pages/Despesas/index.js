@@ -148,10 +148,11 @@ export default function Despesas() {
     }
   };
 
-  const handleExcluir = async () => {
+  const handleExcluir = async (excluirSerie = false) => {
     try {
-      await despesasService.excluir(confirmExcluir.id);
-      toast.success('Despesa excluída!');
+      const params = excluirSerie ? { excluir_serie: true } : undefined;
+      await despesasService.excluir(confirmExcluir.id, params);
+      toast.success(excluirSerie ? 'Série de despesas excluída!' : 'Despesa excluída!');
       setConfirmExcluir(null);
       fetchDespesas();
     } catch (err) {
@@ -484,9 +485,18 @@ export default function Despesas() {
       <ConfirmDialog
         isOpen={!!confirmExcluir}
         onClose={() => setConfirmExcluir(null)}
-        onConfirm={handleExcluir}
+        onConfirm={() => handleExcluir(false)}
         title="Excluir Despesa"
-        message="Tem certeza que deseja excluir esta despesa?"
+        message={
+          confirmExcluir?.recorrencia_id
+            ? 'Esta despesa faz parte de uma série recorrente. Deseja excluir apenas esta ou toda a série?'
+            : 'Tem certeza que deseja excluir esta despesa?'
+        }
+        extraAction={
+          confirmExcluir?.recorrencia_id
+            ? { label: 'Excluir Série Toda', onClick: () => handleExcluir(true), className: 'btn-danger' }
+            : undefined
+        }
       />
     </div>
   );

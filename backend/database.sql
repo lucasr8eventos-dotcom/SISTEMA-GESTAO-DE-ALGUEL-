@@ -147,6 +147,7 @@ CREATE INDEX IF NOT EXISTS idx_reajustes_data_proximo ON reajustes(data_proximo)
 CREATE INDEX IF NOT EXISTS idx_reajustes_status ON reajustes(status);
 CREATE INDEX IF NOT EXISTS idx_log_usuario ON log_atividades(usuario_id);
 CREATE INDEX IF NOT EXISTS idx_log_created ON log_atividades(created_at);
+CREATE INDEX IF NOT EXISTS idx_despesas_recorrencia ON despesas(recorrencia_id);
 -- Garante que não haja dois pagamentos para o mesmo imóvel no mesmo mês/ano
 CREATE UNIQUE INDEX IF NOT EXISTS ux_pagamentos_mes_ano_imovel ON pagamentos(mes, ano, imovel_id);
 
@@ -169,6 +170,21 @@ END $$;
 
 -- Adiciona coluna recorrencia_id em despesas (para agrupar despesas geradas em série)
 ALTER TABLE despesas ADD COLUMN IF NOT EXISTS recorrencia_id INTEGER;
+
+-- Adiciona FK de integridade referencial para recorrencia_id (auto-referência com SET NULL ao excluir raiz)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE table_name = 'despesas' AND constraint_name = 'fk_despesas_recorrencia'
+  ) THEN
+    ALTER TABLE despesas ADD CONSTRAINT fk_despesas_recorrencia
+      FOREIGN KEY (recorrencia_id) REFERENCES despesas(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
+-- Índice para recorrencia_id (busca de série)
+CREATE INDEX IF NOT EXISTS idx_despesas_recorrencia ON despesas(recorrencia_id);
 
 -- ============================================================
 -- TRIGGERS updated_at

@@ -38,10 +38,12 @@ export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [evolucao, setEvolucao] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
     const fetchData = async () => {
+      setErro(null);
       try {
         const [statsRes, evolucaoRes] = await Promise.all([
           dashboardService.stats(),
@@ -55,8 +57,8 @@ export default function Dashboard() {
           'Recebido': parseFloat(r.total_recebido || 0)
         }));
         setEvolucao(evData);
-      } catch {
-        // falha silenciosa — dashboard fica em branco se a API não responder
+      } catch (err) {
+        setErro(err.response?.data?.error || 'Não foi possível carregar o dashboard. Verifique sua conexão.');
       } finally {
         setLoading(false);
       }
@@ -66,6 +68,19 @@ export default function Dashboard() {
 
   if (loading) {
     return <div className="loading-spinner"><div className="spinner" /></div>;
+  }
+
+  if (erro) {
+    return (
+      <div style={{ padding: 40, textAlign: 'center' }}>
+        <AlertCircle size={48} color="var(--danger)" style={{ marginBottom: 16 }} />
+        <h2 style={{ color: 'var(--gray-700)', marginBottom: 8 }}>Erro ao carregar dashboard</h2>
+        <p style={{ color: 'var(--gray-500)' }}>{erro}</p>
+        <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={() => window.location.reload()}>
+          Tentar novamente
+        </button>
+      </div>
+    );
   }
 
   if (!stats) return null;
