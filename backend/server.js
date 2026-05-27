@@ -9,6 +9,7 @@ const { body, param, query, validationResult } = require('express-validator');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const fsp = require('fs').promises;
 const PDFDocument = require('pdfkit');
 const ExcelJS = require('exceljs');
 const { v4: uuidv4 } = require('uuid');
@@ -29,8 +30,27 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 
+// FRONTEND_URL aceita lista separada por vírgula (ex: "https://app.com,https://www.app.com").
+// Em produção, exige pelo menos uma URL configurada — sem fallback para localhost.
+const FRONTEND_URLS = (process.env.FRONTEND_URL || '')
+  .split(',')
+  .map((u) => u.trim())
+  .filter(Boolean);
+
+if (process.env.NODE_ENV === 'production' && FRONTEND_URLS.length === 0) {
+  console.error('❌ FATAL: FRONTEND_URL não definida em produção. Defina a URL do frontend (separe por vírgula se houver múltiplas).');
+  process.exit(1);
+}
+
+const corsOrigins = FRONTEND_URLS.length > 0 ? FRONTEND_URLS : ['http://localhost:3000'];
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: (origin, cb) => {
+    // Permite chamadas server-to-server (sem Origin) e mesma origem
+    if (!origin) return cb(null, true);
+    if (corsOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error(`CORS bloqueado para origem: ${origin}`));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -57,11 +77,15 @@ const loginLimiter = rateLimit({
 // BANCO DE DADOS
 // ============================================================
 
+// Pool sizing: Railway Hobby Postgres tem limite baixo de conexões (~20-30 totais).
+// Default 10 deixa margem para múltiplas réplicas e operações administrativas.
+const POOL_MAX = parseInt(process.env.DB_POOL_MAX) || 10;
+
 const pool = process.env.DATABASE_URL
   ? new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
-      max: 20,
+      max: POOL_MAX,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 5000,
     })
@@ -71,10 +95,14 @@ const pool = process.env.DATABASE_URL
       database: process.env.DB_NAME || 'gestao_alugueis',
       password: process.env.DB_PASSWORD,
       port: parseInt(process.env.DB_PORT) || 5432,
-      max: 20,
+      max: POOL_MAX,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 2000,
     });
+
+pool.on('error', (err) => {
+  console.error('Erro inesperado no pool do Postgres:', err.message);
+});
 
 pool.connect((err, client, release) => {
   if (err) {
@@ -167,6 +195,20 @@ app.get('/api/uploads/:filename', authenticateToken, (req, res) => {
   res.sendFile(path.resolve(filePath));
 });
 
+// Helper de paginação retrocompatível: aceita ?limit e ?offset (com cap).
+// Retorna { limit, offset, sqlSuffix } pronto para concatenar em query.
+const MAX_PAGE_SIZE = 500;
+const DEFAULT_PAGE_SIZE = 500;
+const buildPagination = (req, params) => {
+  const limit = Math.min(parseInt(req.query.limit) || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
+  const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+  params.push(limit);
+  const limitIdx = params.length;
+  params.push(offset);
+  const offsetIdx = params.length;
+  return { limit, offset, sqlSuffix: ` LIMIT $${limitIdx} OFFSET $${offsetIdx}` };
+};
+
 // ============================================================
 // LOG DE ATIVIDADES
 // ============================================================
@@ -215,22 +257,26 @@ const existeContratoSobreposto = async (imovelId, dataInicio, dataFim, excluirId
 // Executada no startup e periodicamente.
 const sincronizarStatusVencidos = async () => {
   try {
-    // Marca contratos vencidos e libera imóveis que não têm outro contrato ativo
     const c = await pool.query(
       "UPDATE contratos SET status='vencido' WHERE status='ativo' AND data_fim < CURRENT_DATE RETURNING id, imovel_id"
     );
+    let imoveisLiberados = 0;
     if (c.rowCount > 0) {
-      // Para cada imóvel afetado, verifica se ainda existe contrato ativo antes de marcar como vago
-      const imovelIds = [...new Set(c.rows.map(r => r.imovel_id))];
-      for (const imovelId of imovelIds) {
-        const ainda = await pool.query(
-          "SELECT id FROM contratos WHERE imovel_id=$1 AND status='ativo' LIMIT 1",
-          [imovelId]
-        );
-        if (ainda.rows.length === 0) {
-          await pool.query("UPDATE imoveis SET status='vago' WHERE id=$1 AND status='alugado'", [imovelId]);
-        }
-      }
+      // Single SQL: marca como 'vago' qualquer imóvel que tenha contrato recém-vencido
+      // E que não possua mais nenhum contrato 'ativo'.
+      const imovelIds = [...new Set(c.rows.map((r) => r.imovel_id))];
+      const upd = await pool.query(
+        `UPDATE imoveis SET status='vago'
+         WHERE id = ANY($1::int[])
+           AND status='alugado'
+           AND NOT EXISTS (
+             SELECT 1 FROM contratos
+             WHERE contratos.imovel_id = imoveis.id AND contratos.status='ativo'
+           )
+         RETURNING id`,
+        [imovelIds]
+      );
+      imoveisLiberados = upd.rowCount;
     }
     const p = await pool.query(
       "UPDATE pagamentos SET status='atrasado' WHERE status='pendente' AND data_vencimento < CURRENT_DATE RETURNING id"
@@ -239,7 +285,7 @@ const sincronizarStatusVencidos = async () => {
       "UPDATE despesas SET status='atrasado' WHERE status='pendente' AND vencimento < CURRENT_DATE RETURNING id"
     );
     if (c.rowCount || p.rowCount || d.rowCount) {
-      console.log(`🔁 Sync de vencidos: ${c.rowCount} contrato(s), ${p.rowCount} pagamento(s), ${d.rowCount} despesa(s)`);
+      console.log(`🔁 Sync de vencidos: ${c.rowCount} contrato(s), ${imoveisLiberados} imóvel(is) liberados, ${p.rowCount} pagamento(s), ${d.rowCount} despesa(s)`);
     }
   } catch (err) {
     console.error('Erro ao sincronizar vencidos:', err.message);
@@ -410,7 +456,8 @@ app.get('/api/inquilinos', authenticateToken, async (req, res) => {
     }
 
     queryStr += ' ORDER BY nome';
-    const result = await pool.query(queryStr, params);
+    const { sqlSuffix } = buildPagination(req, params);
+    const result = await pool.query(queryStr + sqlSuffix, params);
     res.json(result.rows);
   } catch (error) {
     res.status(500).json({ error: 'Erro no servidor' });
@@ -544,7 +591,8 @@ app.get('/api/imoveis', authenticateToken, async (req, res) => {
     if (conditions.length > 0) queryStr += ' WHERE ' + conditions.join(' AND ');
     queryStr += ' ORDER BY codigo';
 
-    const result = await pool.query(queryStr, params);
+    const { sqlSuffix } = buildPagination(req, params);
+    const result = await pool.query(queryStr + sqlSuffix, params);
     res.json(result.rows);
   } catch (error) {
     res.status(500).json({ error: 'Erro no servidor' });
@@ -730,7 +778,8 @@ app.get('/api/contratos', authenticateToken, async (req, res) => {
     if (conditions.length > 0) queryStr += ' WHERE ' + conditions.join(' AND ');
     queryStr += ' ORDER BY c.id DESC';
 
-    const result = await pool.query(queryStr, params);
+    const { sqlSuffix } = buildPagination(req, params);
+    const result = await pool.query(queryStr + sqlSuffix, params);
     res.json(result.rows);
   } catch (error) {
     res.status(500).json({ error: 'Erro no servidor' });
@@ -799,7 +848,7 @@ app.post('/api/contratos', authenticateToken, upload.single('arquivo_pdf'), [
   }
 });
 
-app.put('/api/contratos/:id', authenticateToken, upload.single('arquivo_pdf'), [
+app.put('/api/contratos/:id', authenticateToken, authorizeAdmin, upload.single('arquivo_pdf'), [
   param('id').isInt({ min: 1 }),
   body('imovel_id').isInt({ min: 1 }),
   body('inquilino_id').isInt({ min: 1 }),
@@ -821,10 +870,12 @@ app.put('/api/contratos/:id', authenticateToken, upload.single('arquivo_pdf'), [
     const arquivo_pdf = req.file ? req.file.filename : pdfAntigo;
     if (req.file && pdfAntigo) {
       const caminhoAntigo = path.join(uploadDir, pdfAntigo);
-      if (fs.existsSync(caminhoAntigo)) {
-        fs.unlink(caminhoAntigo, (err) => {
-          if (err) console.warn(`Aviso: não foi possível deletar PDF antigo ${pdfAntigo}:`, err.message);
-        });
+      try {
+        await fsp.unlink(caminhoAntigo);
+      } catch (err) {
+        if (err.code !== 'ENOENT') {
+          console.warn(`Aviso: não foi possível deletar PDF antigo ${pdfAntigo}:`, err.message);
+        }
       }
     }
 
@@ -909,10 +960,12 @@ app.delete('/api/contratos/:id', authenticateToken, authorizeAdmin, [
     // Remove PDF do contrato do disco se existir
     if (contrato.arquivo_pdf) {
       const caminhoPdf = path.join(uploadDir, contrato.arquivo_pdf);
-      if (fs.existsSync(caminhoPdf)) {
-        fs.unlink(caminhoPdf, (err) => {
-          if (err) console.warn(`Aviso: não foi possível deletar PDF do contrato ${id}:`, err.message);
-        });
+      try {
+        await fsp.unlink(caminhoPdf);
+      } catch (err) {
+        if (err.code !== 'ENOENT') {
+          console.warn(`Aviso: não foi possível deletar PDF do contrato ${id}:`, err.message);
+        }
       }
     }
 
@@ -963,7 +1016,8 @@ app.get('/api/pagamentos', authenticateToken, async (req, res) => {
     if (conditions.length > 0) queryStr += ' WHERE ' + conditions.join(' AND ');
     queryStr += ' ORDER BY p.ano DESC, p.mes DESC, i.codigo';
 
-    const result = await pool.query(queryStr, params);
+    const { sqlSuffix } = buildPagination(req, params);
+    const result = await pool.query(queryStr + sqlSuffix, params);
     res.json(result.rows);
   } catch (error) {
     res.status(500).json({ error: 'Erro no servidor' });
@@ -1013,7 +1067,7 @@ app.post('/api/pagamentos', authenticateToken, [
   }
 });
 
-app.put('/api/pagamentos/:id', authenticateToken, [
+app.put('/api/pagamentos/:id', authenticateToken, authorizeAdmin, [
   param('id').isInt({ min: 1 }),
   body('mes').isInt({ min: 1, max: 12 }),
   body('ano').isInt({ min: 2000, max: 2099 }),
@@ -1226,7 +1280,8 @@ app.get('/api/despesas', authenticateToken, async (req, res) => {
     if (conditions.length > 0) queryStr += ' WHERE ' + conditions.join(' AND ');
     queryStr += ' ORDER BY d.vencimento DESC';
 
-    const result = await pool.query(queryStr, params);
+    const { sqlSuffix } = buildPagination(req, params);
+    const result = await pool.query(queryStr + sqlSuffix, params);
     res.json(result.rows);
   } catch (error) {
     res.status(500).json({ error: 'Erro no servidor' });
@@ -1545,7 +1600,7 @@ app.post('/api/reajustes', authenticateToken, [
   }
 });
 
-app.put('/api/reajustes/:id', authenticateToken, [
+app.put('/api/reajustes/:id', authenticateToken, authorizeAdmin, [
   param('id').isInt({ min: 1 }),
   body('imovel_id').isInt({ min: 1 }),
   body('valor_atual').isFloat({ min: 0 }),
@@ -1564,6 +1619,12 @@ app.put('/api/reajustes/:id', authenticateToken, [
     const coerencia = await validarContratoDoImovel(contrato_id, imovel_id);
     if (!coerencia.ok) return res.status(400).json({ error: coerencia.error });
 
+    // Bloqueia re-aplicação: se já estava 'aplicado' e está sendo marcado de novo,
+    // não pode multiplicar o valor do contrato/imóvel uma segunda vez.
+    const atual = await pool.query('SELECT status FROM reajustes WHERE id=$1', [id]);
+    if (atual.rows.length === 0) return res.status(404).json({ error: 'Reajuste não encontrado' });
+    const jaAplicado = atual.rows[0].status === 'aplicado';
+
     const result = await pool.query(
       `UPDATE reajustes SET imovel_id=$1, contrato_id=$2, valor_atual=$3, data_ultimo=$4,
         data_proximo=$5, percentual=$6, novo_valor=$7, status=$8, observacoes=$9, updated_at=NOW()
@@ -1571,10 +1632,8 @@ app.put('/api/reajustes/:id', authenticateToken, [
       [imovel_id, contrato_id || null, valor_atual, data_ultimo || null, data_proximo, percentual, novoValorCalc, status, observacoes, id]
     );
 
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Reajuste não encontrado' });
-
-    // Ao marcar reajuste como 'aplicado', atualiza o valor do contrato e do imóvel
-    if (status === 'aplicado' && result.rows[0].contrato_id) {
+    // Só propaga para contrato/imóvel na TRANSIÇÃO para 'aplicado' (não em re-edições)
+    if (status === 'aplicado' && !jaAplicado && result.rows[0].contrato_id) {
       await pool.query(
         'UPDATE contratos SET valor=$1, updated_at=NOW() WHERE id=$2',
         [novoValorCalc, result.rows[0].contrato_id]
@@ -1941,7 +2000,14 @@ app.get('/api/relatorios/exportar/pdf', authenticateToken, async (req, res) => {
 // HEALTH CHECK
 // ============================================================
 
-app.get('/health', async (req, res) => {
+// Health check raso (usado pelo Railway): retorna OK mesmo se o BD estiver instável,
+// evitando que blip momentâneo do Postgres derrube o container.
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime() });
+});
+
+// Health check profundo: valida conectividade com o BD. Use em monitoramento externo.
+app.get('/health/db', async (req, res) => {
   try {
     await pool.query('SELECT 1');
     res.json({ status: 'ok', db: 'ok', uptime: process.uptime() });
@@ -1975,6 +2041,9 @@ app.use((err, req, res, next) => {
   if (err && err.message && err.message.includes('Tipo de arquivo')) {
     return res.status(400).json({ error: err.message });
   }
+  if (err && err.message && err.message.startsWith('CORS bloqueado')) {
+    return res.status(403).json({ error: err.message });
+  }
   console.error('Erro não tratado:', err);
   res.status(500).json({ error: 'Erro interno do servidor' });
 });
@@ -2002,6 +2071,8 @@ async function runMigrations() {
     await pool.query(`ALTER TABLE despesas ADD COLUMN IF NOT EXISTS recorrencia_id INTEGER`);
     // Índice para busca de série de despesas
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_despesas_recorrencia ON despesas(recorrencia_id)`);
+    // Índice funcional para filtros por mês/ano em despesas (EXTRACT não usa índice comum)
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_despesas_venc_ano_mes ON despesas((EXTRACT(YEAR FROM vencimento)::int), (EXTRACT(MONTH FROM vencimento)::int))`);
     // FK de integridade referencial para recorrencia_id (bancos existentes)
     await pool.query(`
       DO $$

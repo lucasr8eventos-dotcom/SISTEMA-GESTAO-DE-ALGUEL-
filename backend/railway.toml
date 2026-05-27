@@ -4,6 +4,12 @@ dockerfilePath = "Dockerfile"
 
 [deploy]
 healthcheckPath = "/health"
-healthcheckTimeout = 60
+healthcheckTimeout = 30
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
+
+# IMPORTANTE: para persistência de PDFs de contratos no Railway, configure
+# um Volume montado em /app/uploads no painel:
+#   Service > Settings > Volumes > Add Volume
+#   Mount path: /app/uploads
+# Sem isso, todos os PDFs são perdidos a cada deploy/restart.
