@@ -217,7 +217,7 @@ CREATE INDEX IF NOT EXISTS idx_despesas_status ON despesas(status);
 CREATE INDEX IF NOT EXISTS idx_despesas_imovel ON despesas(imovel_id);
 CREATE INDEX IF NOT EXISTS idx_reajustes_data_proximo ON reajustes(data_proximo);
 CREATE INDEX IF NOT EXISTS idx_reajustes_status ON reajustes(status);
-CREATE INDEX IF NOT EXISTS idx_recibos_numero ON recibos(numero);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_recibos_numero ON recibos(numero);
 CREATE INDEX IF NOT EXISTS idx_recibos_created ON recibos(created_at);
 CREATE INDEX IF NOT EXISTS idx_log_usuario ON log_atividades(usuario_id);
 CREATE INDEX IF NOT EXISTS idx_log_created ON log_atividades(created_at);

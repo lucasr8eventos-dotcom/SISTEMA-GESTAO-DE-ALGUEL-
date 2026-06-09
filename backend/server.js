@@ -1263,11 +1263,16 @@ app.post('/api/despesas', authenticateToken, [
     if (total > 1) {
       // Agrupa a série pelo id da primeira parcela
       await client.query('UPDATE despesas SET recorrencia_id = $1 WHERE id = $1', [primeira.id]);
-      const dataBase = new Date(vencimento);
+      // Cálculo puro (sem fuso horário) e com "trava" no último dia do mês:
+      // vencimento dia 31 em mês de 30 dias vira dia 30, não pula para o mês seguinte.
+      const [by, bm, bd] = vencimento.split('-').map(Number); // ano, mês(1-12), dia
       for (let i = 1; i < total; i++) {
-        const d = new Date(dataBase);
-        d.setMonth(d.getMonth() + i);
-        const futuraISO = d.toISOString().split('T')[0];
+        const idxMes = (bm - 1) + i;            // índice de mês a partir do mês base (0-based)
+        const ty = by + Math.floor(idxMes / 12);
+        const tm = idxMes % 12;                 // 0-based
+        const ultimoDia = new Date(ty, tm + 1, 0).getDate();
+        const td = Math.min(bd, ultimoDia);
+        const futuraISO = `${ty}-${String(tm + 1).padStart(2, '0')}-${String(td).padStart(2, '0')}`;
         const r = await client.query(
           `INSERT INTO despesas (imovel_id, tipo, valor, vencimento, status, descricao, observacoes, parcela_num, parcela_total, recorrencia_id)
            VALUES ($1,$2,$3,$4,'pendente',$5,$6,$7,$8,$9) RETURNING *`,
@@ -2561,6 +2566,9 @@ app.post('/api/recibos', authenticateToken, [
     }
     if (!pag.nome) { await client.query('ROLLBACK'); return res.status(422).json({ error: 'Informe quem está pagando' }); }
 
+    // Trava de concorrência: serializa a alocação do número entre requisições
+    // simultâneas (a trava é liberada automaticamente no COMMIT/ROLLBACK).
+    await client.query('SELECT pg_advisory_xact_lock(916273)');
     const numQ = await client.query('SELECT COALESCE(MAX(numero), $1) AS max FROM recibos', [RECIBO_NUMERO_INICIAL - 1]);
     const numero = parseInt(numQ.rows[0].max, 10) + 1;
     const extenso = valorPorExtenso(b.valor);
@@ -2771,7 +2779,13 @@ async function runMigrations() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_recibos_numero ON recibos(numero)`);
+    // Índice ÚNICO no número do recibo (evita numeração duplicada).
+    // Em try próprio para não abortar as demais migrations caso existam dados legados.
+    try {
+      await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS ux_recibos_numero ON recibos(numero)`);
+    } catch (e) {
+      console.warn('⚠️  Não foi possível criar índice único de recibos.numero:', e.message);
+    }
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_recibos_created ON recibos(created_at)`);
     console.log('✅ Migrations aplicadas');
   } catch (err) {
