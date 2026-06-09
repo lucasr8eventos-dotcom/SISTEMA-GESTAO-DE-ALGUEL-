@@ -1460,8 +1460,11 @@ app.delete('/api/despesas/:id', authenticateToken, authorizeAdmin, [
 const buscarDespesasParaExport = async (req) => {
   const { status, tipo, imovel_id, mes, ano } = req.query;
   let queryStr = `
-    SELECT d.*, i.codigo as imovel_codigo, i.endereco as imovel_endereco
-    FROM despesas d LEFT JOIN imoveis i ON d.imovel_id = i.id
+    SELECT d.*, i.codigo as imovel_codigo, i.endereco as imovel_endereco,
+           COALESCE(dt.nome, d.tipo) AS tipo_nome
+    FROM despesas d
+    LEFT JOIN imoveis i ON d.imovel_id = i.id
+    LEFT JOIN despesa_tipos dt ON dt.codigo = d.tipo
   `;
   const params = [];
   const conditions = [];
@@ -1499,6 +1502,8 @@ app.get('/api/despesas/exportar/excel', authenticateToken, async (req, res) => {
     rows.forEach((row) => {
       const newRow = ws.addRow({
         ...row,
+        imovel_codigo: row.imovel_codigo || 'Geral',
+        tipo: row.tipo_nome || row.tipo,
         vencimento: row.vencimento ? new Date(row.vencimento).toLocaleDateString('pt-BR') : ''
       });
       let color = 'FFFFFFFF';
@@ -1563,8 +1568,8 @@ app.get('/api/despesas/exportar/pdf', authenticateToken, async (req, res) => {
         y = 40;
       }
       const venc = r.vencimento ? new Date(r.vencimento).toLocaleDateString('pt-BR') : '—';
-      doc.text(r.imovel_codigo || '—', startX + cols[0].x, y, { width: cols[0].w });
-      doc.text(r.tipo, startX + cols[1].x, y, { width: cols[1].w });
+      doc.text(r.imovel_codigo || 'Geral', startX + cols[0].x, y, { width: cols[0].w });
+      doc.text(r.tipo_nome || r.tipo, startX + cols[1].x, y, { width: cols[1].w });
       doc.text((r.descricao || '—').substring(0, 50), startX + cols[2].x, y, { width: cols[2].w });
       doc.text(`R$ ${parseFloat(r.valor).toFixed(2)}`, startX + cols[3].x, y, { width: cols[3].w });
       doc.text(venc, startX + cols[4].x, y, { width: cols[4].w });
@@ -2622,6 +2627,71 @@ app.delete('/api/recibos/:id', authenticateToken, [param('id').isInt({ min: 1 })
   } catch (e) { res.status(500).json({ error: 'Erro ao excluir recibo' }); }
 });
 
+// ============================================================
+// AGENDA — eventos manuais
+// ============================================================
+const TIPOS_AGENDA = ['vistoria_entrada', 'vistoria_saida', 'visita', 'manutencao', 'reuniao', 'outro'];
+
+app.get('/api/agenda-eventos', authenticateToken, async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT a.*, i.codigo AS imovel_codigo, i.endereco AS imovel_endereco
+      FROM agenda_eventos a
+      LEFT JOIN imoveis i ON a.imovel_id = i.id
+      ORDER BY a.data ASC, a.hora ASC NULLS FIRST
+    `);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: 'Erro ao listar eventos' }); }
+});
+
+app.post('/api/agenda-eventos', authenticateToken, [
+  body('titulo').trim().notEmpty().withMessage('Título é obrigatório'),
+  body('data').isDate().withMessage('Data inválida'),
+  body('hora').optional({ values: 'falsy' }).matches(/^\d{2}:\d{2}(:\d{2})?$/).withMessage('Hora inválida'),
+  body('tipo').optional({ values: 'falsy' }).isIn(TIPOS_AGENDA),
+  body('imovel_id').optional({ values: 'falsy' }).isInt({ min: 1 })
+], validate, async (req, res) => {
+  try {
+    const { titulo, data, hora, tipo, imovel_id, descricao } = req.body;
+    const r = await pool.query(
+      `INSERT INTO agenda_eventos (titulo, data, hora, tipo, imovel_id, descricao, usuario_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [titulo, data, hora || null, tipo || 'outro', imovel_id || null, descricao || null, req.user.id]
+    );
+    logAtividade(req.user.id, 'criar', 'agenda', r.rows[0].id, titulo, req.ip);
+    res.status(201).json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: 'Erro ao salvar evento' }); }
+});
+
+app.put('/api/agenda-eventos/:id', authenticateToken, [
+  param('id').isInt({ min: 1 }),
+  body('titulo').trim().notEmpty(),
+  body('data').isDate(),
+  body('hora').optional({ values: 'falsy' }).matches(/^\d{2}:\d{2}(:\d{2})?$/),
+  body('tipo').optional({ values: 'falsy' }).isIn(TIPOS_AGENDA),
+  body('imovel_id').optional({ values: 'falsy' }).isInt({ min: 1 })
+], validate, async (req, res) => {
+  try {
+    const { titulo, data, hora, tipo, imovel_id, descricao } = req.body;
+    const r = await pool.query(
+      `UPDATE agenda_eventos SET titulo=$1, data=$2, hora=$3, tipo=$4, imovel_id=$5, descricao=$6, updated_at=NOW()
+       WHERE id=$7 RETURNING *`,
+      [titulo, data, hora || null, tipo || 'outro', imovel_id || null, descricao || null, req.params.id]
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Evento não encontrado' });
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: 'Erro ao atualizar evento' }); }
+});
+
+app.delete('/api/agenda-eventos/:id', authenticateToken, [param('id').isInt({ min: 1 })], validate, async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM agenda_eventos WHERE id=$1 RETURNING id', [req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Evento não encontrado' });
+    logAtividade(req.user.id, 'excluir', 'agenda', req.params.id, null, req.ip);
+    res.json({ message: 'Evento excluído' });
+  } catch (e) { res.status(500).json({ error: 'Erro ao excluir evento' }); }
+});
+
 app.get('/', (req, res) => {
   res.json({ name: 'gestao-alugueis-api', version: '2.0.0', status: 'running' });
 });
@@ -2725,6 +2795,23 @@ async function runMigrations() {
           CHECK (status IN ('pago', 'pendente', 'atrasado', 'parcial'));
       END $$;
     `);
+
+    // Agenda — eventos manuais persistidos no banco
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS agenda_eventos (
+        id SERIAL PRIMARY KEY,
+        titulo VARCHAR(255) NOT NULL,
+        data DATE NOT NULL,
+        hora TIME,
+        imovel_id INTEGER REFERENCES imoveis(id) ON DELETE SET NULL,
+        tipo VARCHAR(40) NOT NULL DEFAULT 'outro',
+        descricao TEXT,
+        usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_agenda_data ON agenda_eventos(data)`);
 
     // Tabelas do gerador de recibos (criadas em bancos já existentes)
     await pool.query(`

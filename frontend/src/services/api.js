@@ -132,6 +132,14 @@ export const recibosService = {
   excluirPagador: (id) => api.delete(`/recibos/pagadores/${id}`)
 };
 
+// ===== AGENDA (eventos manuais) =====
+export const agendaService = {
+  listar: () => api.get('/agenda-eventos'),
+  criar: (dados) => api.post('/agenda-eventos', dados),
+  atualizar: (id, dados) => api.put(`/agenda-eventos/${id}`, dados),
+  excluir: (id) => api.delete(`/agenda-eventos/${id}`)
+};
+
 // ===== DASHBOARD =====
 export const dashboardService = {
   stats: () => api.get('/dashboard/stats'),

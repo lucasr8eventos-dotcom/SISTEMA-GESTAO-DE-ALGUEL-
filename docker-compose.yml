@@ -5,6 +5,7 @@ services:
     image: postgres:15-alpine
     container_name: gestao_postgres
     environment:
+      TZ: UTC
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: gestao_alugueis
@@ -25,6 +26,7 @@ services:
       dockerfile: Dockerfile
     container_name: gestao_backend
     environment:
+      TZ: UTC
       PORT: 5000
       DB_USER: postgres
       DB_HOST: postgres

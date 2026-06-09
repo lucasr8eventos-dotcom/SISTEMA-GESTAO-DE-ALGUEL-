@@ -186,6 +186,20 @@ CREATE TABLE IF NOT EXISTS recibos (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Eventos manuais da Agenda (vistorias, visitas, reuniões, etc.) — salvos no banco
+CREATE TABLE IF NOT EXISTS agenda_eventos (
+    id SERIAL PRIMARY KEY,
+    titulo VARCHAR(255) NOT NULL,
+    data DATE NOT NULL,
+    hora TIME,
+    imovel_id INTEGER REFERENCES imoveis(id) ON DELETE SET NULL,
+    tipo VARCHAR(40) NOT NULL DEFAULT 'outro',
+    descricao TEXT,
+    usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS log_atividades (
     id SERIAL PRIMARY KEY,
     usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
@@ -218,6 +232,7 @@ CREATE INDEX IF NOT EXISTS idx_despesas_imovel ON despesas(imovel_id);
 CREATE INDEX IF NOT EXISTS idx_reajustes_data_proximo ON reajustes(data_proximo);
 CREATE INDEX IF NOT EXISTS idx_reajustes_status ON reajustes(status);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_recibos_numero ON recibos(numero);
+CREATE INDEX IF NOT EXISTS idx_agenda_data ON agenda_eventos(data);
 CREATE INDEX IF NOT EXISTS idx_recibos_created ON recibos(created_at);
 CREATE INDEX IF NOT EXISTS idx_log_usuario ON log_atividades(usuario_id);
 CREATE INDEX IF NOT EXISTS idx_log_created ON log_atividades(created_at);
@@ -287,6 +302,8 @@ DROP TRIGGER IF EXISTS trg_recibo_recebedores_updated_at ON recibo_recebedores;
 CREATE TRIGGER trg_recibo_recebedores_updated_at BEFORE UPDATE ON recibo_recebedores FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 DROP TRIGGER IF EXISTS trg_recibo_pagadores_updated_at ON recibo_pagadores;
 CREATE TRIGGER trg_recibo_pagadores_updated_at BEFORE UPDATE ON recibo_pagadores FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS trg_agenda_eventos_updated_at ON agenda_eventos;
+CREATE TRIGGER trg_agenda_eventos_updated_at BEFORE UPDATE ON agenda_eventos FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================
 -- VIEWS
