@@ -5,12 +5,11 @@ import Topbar from './Topbar';
 
 const pageTitles = {
   '/': { title: 'Dashboard', subtitle: 'Visão geral do sistema' },
+  '/agenda': { title: 'Agenda', subtitle: 'Compromissos e vencimentos' },
   '/imoveis': { title: 'Imóveis', subtitle: 'Cadastro e gerenciamento de imóveis' },
-  '/inquilinos': { title: 'Inquilinos', subtitle: 'Cadastro de inquilinos' },
   '/contratos': { title: 'Contratos', subtitle: 'Gerenciamento de contratos' },
   '/pagamentos': { title: 'Pagamentos', subtitle: 'Controle mensal de aluguéis' },
   '/despesas': { title: 'Despesas', subtitle: 'Despesas fixas dos imóveis' },
-  '/reajustes': { title: 'Reajustes', subtitle: 'Controle de reajustes contratuais' },
   '/relatorios': { title: 'Relatórios', subtitle: 'Relatórios e exportações' },
   '/usuarios': { title: 'Usuários', subtitle: 'Gerenciamento de usuários do sistema' }
 };
@@ -37,7 +36,7 @@ export default function Layout({ children }) {
       {mobileOpen && (
         <div className="sidebar-overlay" onClick={() => setMobileOpen(false)} />
       )}
-      <Sidebar collapsed={collapsed} mobileOpen={mobileOpen} onCollapse={handleToggle} />
+      <Sidebar collapsed={collapsed} mobileOpen={mobileOpen} />
       <div className={`main-content${collapsed ? ' sidebar-collapsed' : ''}`}>
         <Topbar
           title={title}

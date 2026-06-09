@@ -44,7 +44,7 @@ const buildNavItems = (isAdmin) => [
   }] : [])
 ];
 
-export default function Sidebar({ collapsed, mobileOpen, onCollapse }) {
+export default function Sidebar({ collapsed, mobileOpen }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { isAdmin, logout } = useAuth();

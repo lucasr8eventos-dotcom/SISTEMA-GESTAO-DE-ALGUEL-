@@ -239,10 +239,12 @@ ORDER BY dias_atraso DESC;
 -- DADOS INICIAIS
 -- ============================================================
 
--- Senha: admin123 (bcryptjs hash, rounds=10) — TROQUE EM PRODUÇÃO
+-- Usuário administrador inicial.
+-- Senha padrão: admin123 (bcryptjs hash, rounds=10).
+-- ⚠️  TROQUE ESTA SENHA NO PRIMEIRO ACESSO (tela Usuários). Operadores devem
+--     ser criados pela interface — nenhum usuário de senha pública é semeado.
 INSERT INTO usuarios (nome, email, senha, perfil, status) VALUES
-('Administrador', 'admin@sistema.com', '$2a$10$Mr3zId.1uxChJYHuP7zXk.rnsHpbZWl7p0WMuSSvwmZIuy6mhrGf2', 'admin', 'ativo'),
-('Operador', 'operador@sistema.com', '$2a$10$Mr3zId.1uxChJYHuP7zXk.rnsHpbZWl7p0WMuSSvwmZIuy6mhrGf2', 'operador', 'ativo')
+('Administrador', 'admin@sistema.com', '$2a$10$Mr3zId.1uxChJYHuP7zXk.rnsHpbZWl7p0WMuSSvwmZIuy6mhrGf2', 'admin', 'ativo')
 ON CONFLICT (email) DO NOTHING;
 
 -- Imóveis de exemplo

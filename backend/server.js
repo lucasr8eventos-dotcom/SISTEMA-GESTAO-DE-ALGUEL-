@@ -942,6 +942,7 @@ app.get('/api/pagamentos', authenticateToken, async (req, res) => {
     const { mes, ano, imovel_id, status, busca } = req.query;
     let queryStr = `
       SELECT p.*, i.codigo as imovel_codigo, i.endereco as imovel_endereco,
+             c.inquilino_id as inquilino_id,
              inq.nome as inquilino_nome, inq.telefone as inquilino_telefone
       FROM pagamentos p
       LEFT JOIN imoveis i ON p.imovel_id = i.id
