@@ -99,6 +99,30 @@ export const reajustesService = {
   excluir: (id) => api.delete(`/reajustes/${id}`)
 };
 
+// ===== RECIBOS =====
+export const recibosService = {
+  listar: () => api.get('/recibos'),
+  proximoNumero: () => api.get('/recibos/proximo-numero'),
+  criar: (dados) => api.post('/recibos', dados),
+  excluir: (id) => api.delete(`/recibos/${id}`),
+  pdf: (id) => api.get(`/recibos/${id}/pdf`, { responseType: 'blob' }),
+  uploadLogo: (file) => {
+    const fd = new FormData();
+    fd.append('logo', file);
+    return api.post('/recibos/logo', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
+  // Recebedores
+  listarRecebedores: () => api.get('/recibos/recebedores'),
+  criarRecebedor: (dados) => api.post('/recibos/recebedores', dados),
+  atualizarRecebedor: (id, dados) => api.put(`/recibos/recebedores/${id}`, dados),
+  excluirRecebedor: (id) => api.delete(`/recibos/recebedores/${id}`),
+  // Pagadores
+  listarPagadores: () => api.get('/recibos/pagadores'),
+  criarPagador: (dados) => api.post('/recibos/pagadores', dados),
+  atualizarPagador: (id, dados) => api.put(`/recibos/pagadores/${id}`, dados),
+  excluirPagador: (id) => api.delete(`/recibos/pagadores/${id}`)
+};
+
 // ===== DASHBOARD =====
 export const dashboardService = {
   stats: () => api.get('/dashboard/stats'),

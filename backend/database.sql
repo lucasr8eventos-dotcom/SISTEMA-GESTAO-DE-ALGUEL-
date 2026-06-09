@@ -114,6 +114,59 @@ CREATE TABLE IF NOT EXISTS reajustes (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Recebedores salvos (quem recebe — empresa/pessoa que emite o recibo)
+CREATE TABLE IF NOT EXISTS recibo_recebedores (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR(255) NOT NULL,
+    documento VARCHAR(20),
+    endereco TEXT,
+    telefone VARCHAR(20),
+    whatsapp VARCHAR(20),
+    email VARCHAR(255),
+    site VARCHAR(255),
+    logo_url VARCHAR(500),
+    padrao BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Pagadores salvos (quem paga)
+CREATE TABLE IF NOT EXISTS recibo_pagadores (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR(255) NOT NULL,
+    documento VARCHAR(20),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Recibos gerados (guarda um "snapshot" dos dados na hora da emissão,
+-- para que editar/excluir um recebedor não altere recibos já emitidos)
+CREATE TABLE IF NOT EXISTS recibos (
+    id SERIAL PRIMARY KEY,
+    numero INTEGER NOT NULL,
+    recebedor_id INTEGER REFERENCES recibo_recebedores(id) ON DELETE SET NULL,
+    pagador_id INTEGER REFERENCES recibo_pagadores(id) ON DELETE SET NULL,
+    recebedor_nome VARCHAR(255) NOT NULL,
+    recebedor_documento VARCHAR(20),
+    recebedor_endereco TEXT,
+    recebedor_telefone VARCHAR(20),
+    recebedor_whatsapp VARCHAR(20),
+    recebedor_email VARCHAR(255),
+    recebedor_site VARCHAR(255),
+    recebedor_logo_url VARCHAR(500),
+    pagador_nome VARCHAR(255) NOT NULL,
+    pagador_documento VARCHAR(20),
+    valor DECIMAL(12,2) NOT NULL,
+    valor_extenso TEXT,
+    forma_pagamento VARCHAR(30),
+    data_pagamento DATE NOT NULL,
+    referente TEXT NOT NULL,
+    local VARCHAR(255),
+    com_canhoto BOOLEAN NOT NULL DEFAULT true,
+    usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS log_atividades (
     id SERIAL PRIMARY KEY,
     usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
@@ -145,6 +198,8 @@ CREATE INDEX IF NOT EXISTS idx_despesas_status ON despesas(status);
 CREATE INDEX IF NOT EXISTS idx_despesas_imovel ON despesas(imovel_id);
 CREATE INDEX IF NOT EXISTS idx_reajustes_data_proximo ON reajustes(data_proximo);
 CREATE INDEX IF NOT EXISTS idx_reajustes_status ON reajustes(status);
+CREATE INDEX IF NOT EXISTS idx_recibos_numero ON recibos(numero);
+CREATE INDEX IF NOT EXISTS idx_recibos_created ON recibos(created_at);
 CREATE INDEX IF NOT EXISTS idx_log_usuario ON log_atividades(usuario_id);
 CREATE INDEX IF NOT EXISTS idx_log_created ON log_atividades(created_at);
 CREATE INDEX IF NOT EXISTS idx_despesas_recorrencia ON despesas(recorrencia_id);
@@ -209,6 +264,10 @@ DROP TRIGGER IF EXISTS trg_despesas_updated_at ON despesas;
 CREATE TRIGGER trg_despesas_updated_at BEFORE UPDATE ON despesas FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 DROP TRIGGER IF EXISTS trg_reajustes_updated_at ON reajustes;
 CREATE TRIGGER trg_reajustes_updated_at BEFORE UPDATE ON reajustes FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS trg_recibo_recebedores_updated_at ON recibo_recebedores;
+CREATE TRIGGER trg_recibo_recebedores_updated_at BEFORE UPDATE ON recibo_recebedores FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS trg_recibo_pagadores_updated_at ON recibo_pagadores;
+CREATE TRIGGER trg_recibo_pagadores_updated_at BEFORE UPDATE ON recibo_pagadores FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================
 -- VIEWS

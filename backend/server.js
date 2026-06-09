@@ -1952,6 +1952,488 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// ============================================================
+// RECIBOS — gerador de recibos avulsos
+// ============================================================
+
+// Primeiro número de recibo. Ajuste aqui se quiser continuar de outra
+// numeração (ex.: para continuar de 118, defina 118).
+const RECIBO_NUMERO_INICIAL = 1;
+
+const FORMAS_RECIBO = {
+  pix: 'PIX',
+  dinheiro: 'Dinheiro',
+  debito: 'Cartão de Débito',
+  credito: 'Cartão de Crédito',
+  ted: 'TED',
+  transferencia: 'Transferência',
+  boleto: 'Boleto',
+  cheque: 'Cheque',
+  outro: 'Outro'
+};
+
+// ---- Valor por extenso (pt-BR) ----
+const _ext_unidades = ['zero', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove'];
+const _ext_especiais = ['dez', 'onze', 'doze', 'treze', 'quatorze', 'quinze', 'dezesseis', 'dezessete', 'dezoito', 'dezenove'];
+const _ext_dezenas = ['', '', 'vinte', 'trinta', 'quarenta', 'cinquenta', 'sessenta', 'setenta', 'oitenta', 'noventa'];
+const _ext_centenas = ['', 'cento', 'duzentos', 'trezentos', 'quatrocentos', 'quinhentos', 'seiscentos', 'setecentos', 'oitocentos', 'novecentos'];
+
+function _extAte999(n) {
+  if (n === 0) return '';
+  if (n === 100) return 'cem';
+  const partes = [];
+  const c = Math.floor(n / 100);
+  const resto = n % 100;
+  if (c > 0) partes.push(_ext_centenas[c]);
+  if (resto > 0) {
+    if (resto < 10) partes.push(_ext_unidades[resto]);
+    else if (resto < 20) partes.push(_ext_especiais[resto - 10]);
+    else {
+      const d = Math.floor(resto / 10);
+      const u = resto % 10;
+      partes.push(u > 0 ? `${_ext_dezenas[d]} e ${_ext_unidades[u]}` : _ext_dezenas[d]);
+    }
+  }
+  return partes.join(' e ');
+}
+
+function _extInteiro(n) {
+  if (n === 0) return 'zero';
+  const grupos = [];
+  let resto = n;
+  while (resto > 0) { grupos.push(resto % 1000); resto = Math.floor(resto / 1000); }
+  const escalaSing = ['', 'mil', 'milhão', 'bilhão', 'trilhão'];
+  const escalaPlur = ['', 'mil', 'milhões', 'bilhões', 'trilhões'];
+
+  const itens = [];
+  for (let i = grupos.length - 1; i >= 0; i--) {
+    const g = grupos[i];
+    if (g === 0) continue;
+    let texto = _extAte999(g);
+    if (i === 1) texto = (g === 1) ? 'mil' : `${texto} mil`;
+    else if (i >= 2) texto = `${texto} ${g === 1 ? escalaSing[i] : escalaPlur[i]}`;
+    itens.push({ idx: i, g, texto });
+  }
+
+  let saida = '';
+  itens.forEach((it, k) => {
+    if (k === 0) { saida = it.texto; return; }
+    const liga = it.idx === 0 && (it.g < 100 || it.g % 100 === 0);
+    saida += (liga ? ' e ' : ', ') + it.texto;
+  });
+  return saida;
+}
+
+function valorPorExtenso(valorNum) {
+  const v = Math.round(Number(valorNum || 0) * 100);
+  const reais = Math.floor(v / 100);
+  const centavos = v % 100;
+  const partes = [];
+  if (reais > 0) {
+    // milhões/bilhões/trilhões exatos pedem "de reais" (ex.: "dois milhões de reais")
+    const usaDe = reais >= 1000000 && reais % 1000000 === 0;
+    partes.push(`${_extInteiro(reais)} ${usaDe ? 'de ' : ''}${reais === 1 ? 'real' : 'reais'}`);
+  }
+  if (centavos > 0) partes.push(`${_extInteiro(centavos)} ${centavos === 1 ? 'centavo' : 'centavos'}`);
+  if (partes.length === 0) return 'zero real';
+  return partes.join(' e ');
+}
+
+const _MESES_EXT = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+const fmtMoedaPdf = (v) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtDataPdf = (d) => d ? new Date(d).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : '';
+const fmtDataExtenso = (d) => {
+  if (!d) return '';
+  const dt = new Date(d);
+  return `${dt.getUTCDate()} de ${_MESES_EXT[dt.getUTCMonth()]} de ${dt.getUTCFullYear()}`;
+};
+
+// Desenha o recibo no padrão visual (navy + faixa azul + canhoto)
+function desenharReciboPDF(doc, r) {
+  const M = 40;
+  const W = doc.page.width - M * 2;
+  const NAVY = '#16233f';
+  const BLUE = '#2f63d8';
+  const LIGHT = '#f1f4f9';
+  const GRAY = '#6b7280';
+  const DARK = '#1f2937';
+
+  const numeroFmt = String(r.numero).padStart(4, '0');
+  const valorFmt = fmtMoedaPdf(r.valor);
+  const dataFmt = fmtDataPdf(r.data_pagamento);
+  const formaLabel = FORMAS_RECIBO[r.forma_pagamento] || (r.forma_pagamento || '—');
+  const docRec = r.recebedor_documento ? String(r.recebedor_documento) : '';
+
+  // ---- Cabeçalho ----
+  let y = M;
+  const headerH = 92;
+  doc.roundedRect(M, y, W, headerH, 8).fill(NAVY);
+
+  let textX = M + 22;
+  // Logo (se houver arquivo de imagem)
+  if (r.recebedor_logo_url) {
+    const logoPath = path.join(uploadDir, path.basename(r.recebedor_logo_url));
+    const ext = path.extname(logoPath).toLowerCase();
+    if (fs.existsSync(logoPath) && ['.png', '.jpg', '.jpeg'].includes(ext)) {
+      try {
+        const logoSize = 58;
+        doc.roundedRect(M + 16, y + 17, logoSize, logoSize, 6).fill('#ffffff');
+        doc.image(logoPath, M + 19, y + 20, { fit: [logoSize - 6, logoSize - 6], align: 'center', valign: 'center' });
+        textX = M + 16 + logoSize + 16;
+      } catch (_) { /* ignora logo inválida */ }
+    }
+  }
+
+  const infoW = W * 0.62;
+  doc.fill('#ffffff').font('Helvetica-Bold').fontSize(15).text(r.recebedor_nome, textX, y + 16, { width: infoW });
+  doc.font('Helvetica').fontSize(8).fillColor('#c7d2e5');
+  const linhas = [];
+  if (docRec) linhas.push(`CNPJ/CPF: ${docRec}`);
+  if (r.recebedor_endereco) linhas.push(r.recebedor_endereco);
+  const contato = [];
+  if (r.recebedor_telefone) contato.push(`Tel: ${r.recebedor_telefone}`);
+  if (r.recebedor_whatsapp) contato.push(`WhatsApp: ${r.recebedor_whatsapp}`);
+  if (contato.length) linhas.push(contato.join(' | '));
+  if (r.recebedor_email) linhas.push(r.recebedor_email);
+  if (r.recebedor_site) linhas.push(r.recebedor_site);
+  doc.text(linhas.join('\n'), textX, doc.y + 2, { width: infoW, lineGap: 1 });
+
+  // N° e data (direita)
+  doc.font('Helvetica-Bold').fontSize(14).fillColor('#ffffff').text(`N° ${numeroFmt}`, M, y + 20, { width: W - 18, align: 'right' });
+  doc.font('Helvetica').fontSize(8).fillColor('#c7d2e5').text(`Data: ${dataFmt}`, M, y + 40, { width: W - 18, align: 'right' });
+
+  // ---- Faixa do título ----
+  y += headerH + 10;
+  const bandH = 30;
+  doc.roundedRect(M, y, W, bandH, 4).fill(BLUE);
+  doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(13).text('RECIBO DE PAGAMENTO', M, y + 9, { width: W, align: 'center', characterSpacing: 1 });
+
+  // ---- Caixa de valor ----
+  y += bandH + 16;
+  const valH = 56;
+  doc.roundedRect(M, y, W, valH, 6).fill(LIGHT);
+  doc.rect(M, y, 5, valH).fill(BLUE);
+  doc.fillColor(GRAY).font('Helvetica-Bold').fontSize(9).text('VALOR RECEBIDO', M + 22, y + 21, { characterSpacing: 1 });
+  doc.fillColor(BLUE).font('Helvetica-Bold').fontSize(24).text(`R$ ${valorFmt}`, M, y + 15, { width: W - 22, align: 'right' });
+
+  // ---- Corpo ----
+  y += valH + 26;
+  doc.fillColor(DARK).font('Helvetica').fontSize(11);
+  doc.text('Recebi(emos) de ', M, y, { width: W, continued: true });
+  doc.font('Helvetica-Bold').text(r.pagador_nome, { continued: true });
+  if (r.pagador_documento) {
+    doc.font('Helvetica').text(', inscrito(a) no CPF/CNPJ sob nº ', { continued: true });
+    doc.font('Helvetica-Bold').text(String(r.pagador_documento), { continued: true });
+  }
+  doc.font('Helvetica').text(' a importância de ', { continued: true });
+  doc.font('Helvetica-Bold').text(`R$ ${valorFmt} `, { continued: true });
+  doc.font('Helvetica-Oblique').text(`(${r.valor_extenso})`, { continued: true });
+  doc.font('Helvetica').text(', referente a ', { continued: true });
+  doc.font('Helvetica-Bold').text(r.referente, { continued: true });
+  doc.font('Helvetica').text('.');
+
+  doc.moveDown(0.7);
+  doc.font('Helvetica').fontSize(11).fillColor(DARK).text(
+    'Para maior clareza firmo(amos) o presente recibo, dando plena, geral e irrevogável quitação do valor recebido.',
+    M, doc.y, { width: W, align: 'left' }
+  );
+
+  // ---- Forma e data ----
+  y = doc.y + 18;
+  const fpH = 48;
+  doc.roundedRect(M, y, W, fpH, 6).fill(LIGHT);
+  const colW = W / 2;
+  doc.fillColor(GRAY).font('Helvetica-Bold').fontSize(8).text('FORMA DE PAGAMENTO', M + 18, y + 12, { characterSpacing: 0.5 });
+  doc.fillColor(DARK).font('Helvetica-Bold').fontSize(11).text(formaLabel, M + 18, y + 25);
+  doc.fillColor(GRAY).font('Helvetica-Bold').fontSize(8).text('DATA DO PAGAMENTO', M + colW + 6, y + 12, { characterSpacing: 0.5 });
+  doc.fillColor(DARK).font('Helvetica-Bold').fontSize(11).text(dataFmt, M + colW + 6, y + 25);
+
+  // ---- Local e data por extenso ----
+  y += fpH + 22;
+  const local = r.local || 'Brasília';
+  doc.fillColor(DARK).font('Helvetica').fontSize(11).text(`${local}, ${fmtDataExtenso(r.data_pagamento)}.`, M, y, { width: W, align: 'right' });
+
+  // ---- Assinatura ----
+  y = doc.y + 46;
+  const sigW = 280;
+  const sigX = M + (W - sigW) / 2;
+  doc.moveTo(sigX, y).lineTo(sigX + sigW, y).strokeColor('#9aa3b2').lineWidth(1).stroke();
+  doc.fillColor(DARK).font('Helvetica-Bold').fontSize(10).text(r.recebedor_nome, sigX, y + 6, { width: sigW, align: 'center' });
+  if (docRec) doc.fillColor(GRAY).font('Helvetica').fontSize(8).text(`CNPJ/CPF: ${docRec}`, sigX, doc.y + 1, { width: sigW, align: 'center' });
+
+  // ---- Canhoto ----
+  if (r.com_canhoto) {
+    y = doc.y + 30;
+    doc.save();
+    doc.dash(3, { space: 3 }).strokeColor('#c0c6d2').lineWidth(1).moveTo(M, y).lineTo(M + W, y).stroke();
+    doc.restore();
+    // etiqueta "recorte aqui" sobre a linha tracejada
+    const tag = 'recorte aqui';
+    doc.font('Helvetica').fontSize(8).fillColor(GRAY);
+    const tagW = doc.widthOfString(tag) + 12;
+    doc.rect(M + 30, y - 6, tagW, 12).fill('#ffffff');
+    doc.fillColor(GRAY).text(tag, M + 36, y - 4);
+
+    y += 16;
+    const canH = 92;
+    doc.roundedRect(M, y, W, canH, 6).strokeColor('#d9deea').lineWidth(1).stroke();
+    doc.fillColor(DARK).font('Helvetica-Bold').fontSize(10).text(`RECIBO N° ${numeroFmt} — VIA / CANHOTO`, M + 16, y + 14);
+    doc.fillColor(BLUE).font('Helvetica-Bold').fontSize(13).text(`R$ ${valorFmt}`, M, y + 12, { width: W - 16, align: 'right' });
+
+    let cy = y + 36;
+    doc.fontSize(9);
+    doc.fillColor(DARK).font('Helvetica-Bold').text('Pagador: ', M + 16, cy, { continued: true }).font('Helvetica').text(r.pagador_nome);
+    cy += 14;
+    doc.fillColor(DARK).font('Helvetica-Bold').text('Referente a: ', M + 16, cy, { continued: true }).font('Helvetica').text(r.referente, { width: W - 200 });
+    cy += 14;
+    doc.fillColor(DARK).font('Helvetica-Bold').text('Forma: ', M + 16, cy, { continued: true }).font('Helvetica').text(`${formaLabel}  ·  `, { continued: true }).font('Helvetica-Bold').text('Data: ', { continued: true }).font('Helvetica').text(dataFmt);
+  }
+
+  // ---- Rodapé fixo ----
+  const footH = 24;
+  const footY = doc.page.height - M - footH;
+  doc.roundedRect(M, footY, W, footH, 4).fill(NAVY);
+  doc.fillColor('#c7d2e5').font('Helvetica').fontSize(8).text(`${r.recebedor_nome}${docRec ? ' · CNPJ/CPF: ' + docRec : ''}`, M + 12, footY + 8, { width: W * 0.6 });
+  doc.fillColor('#c7d2e5').font('Helvetica').fontSize(8).text(`Recibo N° ${numeroFmt} · ${dataFmt}`, M, footY + 8, { width: W - 12, align: 'right' });
+}
+
+// ---- Recebedores (CRUD) ----
+app.get('/api/recibos/recebedores', authenticateToken, async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM recibo_recebedores ORDER BY padrao DESC, nome ASC');
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: 'Erro ao listar recebedores' }); }
+});
+
+app.post('/api/recibos/recebedores', authenticateToken, [
+  body('nome').trim().notEmpty().withMessage('Nome é obrigatório'),
+  body('padrao').optional().isBoolean()
+], validate, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { nome, documento, endereco, telefone, whatsapp, email, site, logo_url, padrao } = req.body;
+    await client.query('BEGIN');
+    if (padrao) await client.query('UPDATE recibo_recebedores SET padrao = false WHERE padrao = true');
+    const r = await client.query(
+      `INSERT INTO recibo_recebedores (nome, documento, endereco, telefone, whatsapp, email, site, logo_url, padrao)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [nome, documento || null, endereco || null, telefone || null, whatsapp || null, email || null, site || null, logo_url || null, !!padrao]
+    );
+    await client.query('COMMIT');
+    logAtividade(req.user.id, 'criar', 'recibo_recebedor', r.rows[0].id, nome, req.ip);
+    res.status(201).json(r.rows[0]);
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: 'Erro ao salvar recebedor' });
+  } finally { client.release(); }
+});
+
+app.put('/api/recibos/recebedores/:id', authenticateToken, [
+  param('id').isInt({ min: 1 }),
+  body('nome').trim().notEmpty()
+], validate, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { nome, documento, endereco, telefone, whatsapp, email, site, logo_url, padrao } = req.body;
+    await client.query('BEGIN');
+    if (padrao) await client.query('UPDATE recibo_recebedores SET padrao = false WHERE padrao = true AND id <> $1', [req.params.id]);
+    const r = await client.query(
+      `UPDATE recibo_recebedores SET nome=$1, documento=$2, endereco=$3, telefone=$4, whatsapp=$5, email=$6, site=$7, logo_url=$8, padrao=$9
+       WHERE id=$10 RETURNING *`,
+      [nome, documento || null, endereco || null, telefone || null, whatsapp || null, email || null, site || null, logo_url || null, !!padrao, req.params.id]
+    );
+    await client.query('COMMIT');
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Recebedor não encontrado' });
+    res.json(r.rows[0]);
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: 'Erro ao atualizar recebedor' });
+  } finally { client.release(); }
+});
+
+app.delete('/api/recibos/recebedores/:id', authenticateToken, [param('id').isInt({ min: 1 })], validate, async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM recibo_recebedores WHERE id=$1 RETURNING id', [req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Recebedor não encontrado' });
+    logAtividade(req.user.id, 'excluir', 'recibo_recebedor', req.params.id, null, req.ip);
+    res.json({ message: 'Recebedor excluído' });
+  } catch (e) { res.status(500).json({ error: 'Erro ao excluir recebedor' }); }
+});
+
+// ---- Pagadores (CRUD) ----
+app.get('/api/recibos/pagadores', authenticateToken, async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM recibo_pagadores ORDER BY nome ASC');
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: 'Erro ao listar pagadores' }); }
+});
+
+app.post('/api/recibos/pagadores', authenticateToken, [
+  body('nome').trim().notEmpty().withMessage('Nome é obrigatório')
+], validate, async (req, res) => {
+  try {
+    const { nome, documento } = req.body;
+    const r = await pool.query('INSERT INTO recibo_pagadores (nome, documento) VALUES ($1,$2) RETURNING *', [nome, documento || null]);
+    logAtividade(req.user.id, 'criar', 'recibo_pagador', r.rows[0].id, nome, req.ip);
+    res.status(201).json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: 'Erro ao salvar pagador' }); }
+});
+
+app.put('/api/recibos/pagadores/:id', authenticateToken, [
+  param('id').isInt({ min: 1 }),
+  body('nome').trim().notEmpty()
+], validate, async (req, res) => {
+  try {
+    const { nome, documento } = req.body;
+    const r = await pool.query('UPDATE recibo_pagadores SET nome=$1, documento=$2 WHERE id=$3 RETURNING *', [nome, documento || null, req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Pagador não encontrado' });
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: 'Erro ao atualizar pagador' }); }
+});
+
+app.delete('/api/recibos/pagadores/:id', authenticateToken, [param('id').isInt({ min: 1 })], validate, async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM recibo_pagadores WHERE id=$1 RETURNING id', [req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Pagador não encontrado' });
+    res.json({ message: 'Pagador excluído' });
+  } catch (e) { res.status(500).json({ error: 'Erro ao excluir pagador' }); }
+});
+
+// ---- Upload de logo do recebedor ----
+app.post('/api/recibos/logo', authenticateToken, upload.single('logo'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
+  const ext = path.extname(req.file.filename).toLowerCase();
+  if (!['.png', '.jpg', '.jpeg'].includes(ext)) {
+    fs.unlink(req.file.path, () => {});
+    return res.status(400).json({ error: 'A logo deve ser PNG ou JPG' });
+  }
+  res.status(201).json({ logo_url: req.file.filename, url: `/api/uploads/${req.file.filename}` });
+});
+
+// ---- Próximo número de recibo ----
+app.get('/api/recibos/proximo-numero', authenticateToken, async (req, res) => {
+  try {
+    const r = await pool.query('SELECT COALESCE(MAX(numero), $1) AS max FROM recibos', [RECIBO_NUMERO_INICIAL - 1]);
+    res.json({ proximo: parseInt(r.rows[0].max, 10) + 1 });
+  } catch (e) { res.status(500).json({ error: 'Erro ao obter número' }); }
+});
+
+// ---- Listar recibos gerados ----
+app.get('/api/recibos', authenticateToken, async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT id, numero, recebedor_nome, pagador_nome, valor, forma_pagamento,
+             data_pagamento, referente, com_canhoto, created_at
+      FROM recibos ORDER BY numero DESC LIMIT 500
+    `);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: 'Erro ao listar recibos' }); }
+});
+
+// ---- Criar recibo ----
+app.post('/api/recibos', authenticateToken, [
+  body('valor').isFloat({ gt: 0 }).withMessage('Valor deve ser maior que zero'),
+  body('data_pagamento').isISO8601().withMessage('Data inválida'),
+  body('referente').trim().notEmpty().withMessage('Informe a que se refere o pagamento'),
+  body('forma_pagamento').optional({ values: 'falsy' }).isIn(Object.keys(FORMAS_RECIBO)),
+  body('com_canhoto').optional().isBoolean(),
+  body('recebedor_id').optional({ values: 'falsy' }).isInt({ min: 1 }),
+  body('pagador_id').optional({ values: 'falsy' }).isInt({ min: 1 }),
+  body('recebedor_nome').optional({ values: 'falsy' }).trim().notEmpty(),
+  body('pagador_nome').optional({ values: 'falsy' }).trim().notEmpty()
+], validate, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const b = req.body;
+    await client.query('BEGIN');
+
+    // Resolve recebedor (cadastrado ou manual)
+    let rec = {
+      id: null, nome: b.recebedor_nome, documento: b.recebedor_documento || null,
+      endereco: b.recebedor_endereco || null, telefone: b.recebedor_telefone || null,
+      whatsapp: b.recebedor_whatsapp || null, email: b.recebedor_email || null,
+      site: b.recebedor_site || null, logo_url: b.recebedor_logo_url || null
+    };
+    if (b.recebedor_id) {
+      const q = await client.query('SELECT * FROM recibo_recebedores WHERE id=$1', [b.recebedor_id]);
+      if (q.rows.length === 0) { await client.query('ROLLBACK'); return res.status(422).json({ error: 'Recebedor não encontrado' }); }
+      const x = q.rows[0];
+      rec = { id: x.id, nome: x.nome, documento: x.documento, endereco: x.endereco, telefone: x.telefone, whatsapp: x.whatsapp, email: x.email, site: x.site, logo_url: x.logo_url };
+    } else if (b.salvar_recebedor && rec.nome) {
+      const ins = await client.query(
+        `INSERT INTO recibo_recebedores (nome, documento, endereco, telefone, whatsapp, email, site, logo_url)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+        [rec.nome, rec.documento, rec.endereco, rec.telefone, rec.whatsapp, rec.email, rec.site, rec.logo_url]
+      );
+      rec.id = ins.rows[0].id;
+    }
+    if (!rec.nome) { await client.query('ROLLBACK'); return res.status(422).json({ error: 'Informe quem está recebendo' }); }
+
+    // Resolve pagador (cadastrado ou manual)
+    let pag = { id: null, nome: b.pagador_nome, documento: b.pagador_documento || null };
+    if (b.pagador_id) {
+      const q = await client.query('SELECT * FROM recibo_pagadores WHERE id=$1', [b.pagador_id]);
+      if (q.rows.length === 0) { await client.query('ROLLBACK'); return res.status(422).json({ error: 'Pagador não encontrado' }); }
+      pag = { id: q.rows[0].id, nome: q.rows[0].nome, documento: q.rows[0].documento };
+    } else if (b.salvar_pagador && pag.nome) {
+      const ins = await client.query('INSERT INTO recibo_pagadores (nome, documento) VALUES ($1,$2) RETURNING id', [pag.nome, pag.documento]);
+      pag.id = ins.rows[0].id;
+    }
+    if (!pag.nome) { await client.query('ROLLBACK'); return res.status(422).json({ error: 'Informe quem está pagando' }); }
+
+    const numQ = await client.query('SELECT COALESCE(MAX(numero), $1) AS max FROM recibos', [RECIBO_NUMERO_INICIAL - 1]);
+    const numero = parseInt(numQ.rows[0].max, 10) + 1;
+    const extenso = valorPorExtenso(b.valor);
+    const comCanhoto = b.com_canhoto === undefined ? true : !!b.com_canhoto;
+
+    const ins = await client.query(
+      `INSERT INTO recibos
+        (numero, recebedor_id, pagador_id, recebedor_nome, recebedor_documento, recebedor_endereco,
+         recebedor_telefone, recebedor_whatsapp, recebedor_email, recebedor_site, recebedor_logo_url,
+         pagador_nome, pagador_documento, valor, valor_extenso, forma_pagamento, data_pagamento,
+         referente, local, com_canhoto, usuario_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+       RETURNING id, numero`,
+      [numero, rec.id, pag.id, rec.nome, rec.documento, rec.endereco, rec.telefone, rec.whatsapp,
+       rec.email, rec.site, rec.logo_url, pag.nome, pag.documento, b.valor, extenso,
+       b.forma_pagamento || null, b.data_pagamento, b.referente, b.local || null, comCanhoto, req.user.id]
+    );
+    await client.query('COMMIT');
+    logAtividade(req.user.id, 'criar', 'recibo', ins.rows[0].id, `Recibo Nº ${numero}`, req.ip);
+    res.status(201).json(ins.rows[0]);
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: 'Erro ao gerar recibo' });
+  } finally { client.release(); }
+});
+
+// ---- PDF do recibo ----
+app.get('/api/recibos/:id/pdf', authenticateToken, [param('id').isInt({ min: 1 })], validate, async (req, res) => {
+  try {
+    const q = await pool.query('SELECT * FROM recibos WHERE id=$1', [req.params.id]);
+    if (q.rows.length === 0) return res.status(404).json({ error: 'Recibo não encontrado' });
+    const r = q.rows[0];
+    const doc = new PDFDocument({ size: 'A4', margin: 40 });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=recibo-${String(r.numero).padStart(4, '0')}.pdf`);
+    doc.pipe(res);
+    desenharReciboPDF(doc, r);
+    doc.end();
+  } catch (e) {
+    res.status(500).json({ error: 'Erro ao gerar PDF do recibo' });
+  }
+});
+
+// ---- Excluir recibo ----
+app.delete('/api/recibos/:id', authenticateToken, [param('id').isInt({ min: 1 })], validate, async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM recibos WHERE id=$1 RETURNING id', [req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Recibo não encontrado' });
+    logAtividade(req.user.id, 'excluir', 'recibo', req.params.id, null, req.ip);
+    res.json({ message: 'Recibo excluído' });
+  } catch (e) { res.status(500).json({ error: 'Erro ao excluir recibo' }); }
+});
+
 app.get('/', (req, res) => {
   res.json({ name: 'gestao-alugueis-api', version: '2.0.0', status: 'running' });
 });
@@ -2017,6 +2499,61 @@ async function runMigrations() {
         END IF;
       END $$;
     `);
+    // Tabelas do gerador de recibos (criadas em bancos já existentes)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS recibo_recebedores (
+        id SERIAL PRIMARY KEY,
+        nome VARCHAR(255) NOT NULL,
+        documento VARCHAR(20),
+        endereco TEXT,
+        telefone VARCHAR(20),
+        whatsapp VARCHAR(20),
+        email VARCHAR(255),
+        site VARCHAR(255),
+        logo_url VARCHAR(500),
+        padrao BOOLEAN NOT NULL DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS recibo_pagadores (
+        id SERIAL PRIMARY KEY,
+        nome VARCHAR(255) NOT NULL,
+        documento VARCHAR(20),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS recibos (
+        id SERIAL PRIMARY KEY,
+        numero INTEGER NOT NULL,
+        recebedor_id INTEGER REFERENCES recibo_recebedores(id) ON DELETE SET NULL,
+        pagador_id INTEGER REFERENCES recibo_pagadores(id) ON DELETE SET NULL,
+        recebedor_nome VARCHAR(255) NOT NULL,
+        recebedor_documento VARCHAR(20),
+        recebedor_endereco TEXT,
+        recebedor_telefone VARCHAR(20),
+        recebedor_whatsapp VARCHAR(20),
+        recebedor_email VARCHAR(255),
+        recebedor_site VARCHAR(255),
+        recebedor_logo_url VARCHAR(500),
+        pagador_nome VARCHAR(255) NOT NULL,
+        pagador_documento VARCHAR(20),
+        valor DECIMAL(12,2) NOT NULL,
+        valor_extenso TEXT,
+        forma_pagamento VARCHAR(30),
+        data_pagamento DATE NOT NULL,
+        referente TEXT NOT NULL,
+        local VARCHAR(255),
+        com_canhoto BOOLEAN NOT NULL DEFAULT true,
+        usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_recibos_numero ON recibos(numero)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_recibos_created ON recibos(created_at)`);
     console.log('✅ Migrations aplicadas');
   } catch (err) {
     console.error('⚠️  Erro ao rodar migrations:', err.message);
