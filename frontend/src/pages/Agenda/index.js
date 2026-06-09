@@ -1,18 +1,17 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  pagamentosService, contratosService, reajustesService, despesasService, imoveisService
+  pagamentosService, contratosService, reajustesService, despesasService, imoveisService, agendaService
 } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
-import { MESES, formatData } from '../../utils/format';
+import { MESES } from '../../utils/format';
 import {
-  ChevronLeft, ChevronRight, Plus, Calendar as CalendarIcon, List,
-  Pencil, Trash2, Home, FileText, TrendingUp, Receipt, MapPin
+  ChevronLeft, ChevronRight, Plus, Pencil, Trash2,
+  Home, FileText, TrendingUp, Receipt, MapPin
 } from 'lucide-react';
 
 const DIAS_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-const STORAGE_KEY = 'agenda_eventos_manuais';
 
 const TIPOS_MANUAIS = [
   { value: 'vistoria_entrada', label: 'Vistoria de Entrada' },
@@ -23,15 +22,13 @@ const TIPOS_MANUAIS = [
   { value: 'outro', label: 'Outro' }
 ];
 
-const FORM_MANUAL_INICIAL = {
-  titulo: '', data: '', hora: '', imovel_id: '', tipo: 'visita', descricao: ''
-};
+const FORM_MANUAL_INICIAL = { titulo: '', data: '', hora: '', imovel_id: '', tipo: 'visita', descricao: '' };
 
 // ============================================================
-// Helpers
+// Helpers de data
 // ============================================================
 const sameDay = (a, b) =>
-  a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  a && b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
 const parseDate = (s) => {
   if (!s) return null;
@@ -40,170 +37,150 @@ const parseDate = (s) => {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 };
 
-const isoFromDate = (d) => d.toISOString().split('T')[0];
+const isoFromDate = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dia = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dia}`;
+};
 
 const diasEntre = (a, b) => Math.ceil((a.getTime() - b.getTime()) / 86400000);
+const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+const inicioSemana = (d) => addDays(d, -d.getDay()); // domingo
+const meiaNoite = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
 // ============================================================
 // Geradores de eventos automáticos
 // ============================================================
 const gerarEventosPagamentos = (pagamentos) => {
-  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
-  return pagamentos
-    .map((p) => {
-      const data = parseDate(p.data_vencimento);
-      if (!data) return null;
-      const pago = p.status === 'pago' || p.data_pagamento;
-      let cor, status;
-      if (pago) { cor = 'cinza'; status = 'concluido'; }
-      else if (data < hoje) { cor = 'vermelho'; status = 'atrasado'; }
-      else { cor = 'azul'; status = 'pendente'; }
-      return {
-        id: `pag-${p.id}`,
-        tipo: 'aluguel',
-        titulo: `Aluguel — ${p.imovel_codigo || 'Imóvel'} / ${p.inquilino_nome || 'Inquilino'}`,
-        data,
-        cor,
-        status,
-        navegar: `/pagamentos?imovel=${p.imovel_id || ''}&mes=${p.mes || ''}&ano=${p.ano || ''}`,
-        meta: { imovel_id: p.imovel_id }
-      };
-    })
-    .filter(Boolean);
+  const hoje = meiaNoite(new Date());
+  return pagamentos.map((p) => {
+    const data = parseDate(p.data_vencimento);
+    if (!data) return null;
+    const pago = p.status === 'pago' || p.data_pagamento;
+    let cor, status;
+    if (pago) { cor = 'cinza'; status = 'concluido'; }
+    else if (data < hoje) { cor = 'vermelho'; status = 'atrasado'; }
+    else { cor = 'azul'; status = 'pendente'; }
+    return {
+      id: `pag-${p.id}`, tipo: 'aluguel',
+      titulo: `Aluguel — ${p.imovel_codigo || 'Imóvel'} / ${p.inquilino_nome || 'Inquilino'}`,
+      data, hora: '', cor, status,
+      navegar: `/pagamentos?imovel=${p.imovel_id || ''}&mes=${p.mes || ''}&ano=${p.ano || ''}`,
+      meta: { imovel_id: p.imovel_id }
+    };
+  }).filter(Boolean);
 };
 
 const gerarEventosContratos = (contratos) => {
-  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
-  const renovados = new Set(); // Imóveis que têm contrato ativo mais recente
-  contratos.forEach((c) => {
-    if (c.status === 'ativo' && c.imovel_id) renovados.add(c.imovel_id);
-  });
-
-  return contratos
-    .map((c) => {
-      const data = parseDate(c.data_fim);
-      if (!data) return null;
-      const dias = diasEntre(data, hoje);
-      let cor, status;
-      if (c.status === 'encerrado' && renovados.has(c.imovel_id)) {
-        cor = 'cinza'; status = 'concluido';
-      } else if (dias < 0) {
-        cor = 'vermelho'; status = 'atrasado';
-      } else if (dias <= 30) {
-        cor = 'amarelo'; status = 'pendente';
-      } else {
-        cor = 'amarelo'; status = 'pendente';
-      }
-      return {
-        id: `cont-${c.id}`,
-        tipo: 'contrato',
-        titulo: `Contrato — ${c.imovel_codigo || 'Imóvel'} / ${c.inquilino_nome || 'Inquilino'}`,
-        data,
-        cor,
-        status,
-        navegar: `/contratos?id=${c.id}`,
-        meta: { imovel_id: c.imovel_id, contrato_id: c.id }
-      };
-    })
-    .filter(Boolean);
+  const hoje = meiaNoite(new Date());
+  const renovados = new Set();
+  contratos.forEach((c) => { if (c.status === 'ativo' && c.imovel_id) renovados.add(c.imovel_id); });
+  return contratos.map((c) => {
+    const data = parseDate(c.data_fim);
+    if (!data) return null;
+    const dias = diasEntre(data, hoje);
+    let cor, status;
+    if (c.status === 'encerrado' && renovados.has(c.imovel_id)) { cor = 'cinza'; status = 'concluido'; }
+    else if (dias < 0) { cor = 'vermelho'; status = 'atrasado'; }
+    else { cor = 'amarelo'; status = 'pendente'; }
+    return {
+      id: `cont-${c.id}`, tipo: 'contrato',
+      titulo: `Contrato — ${c.imovel_codigo || 'Imóvel'} / ${c.inquilino_nome || 'Inquilino'}`,
+      data, hora: '', cor, status,
+      navegar: `/contratos?id=${c.id}`, meta: { imovel_id: c.imovel_id }
+    };
+  }).filter(Boolean);
 };
 
 const gerarEventosReajustes = (reajustes) => {
-  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
-  return reajustes
-    .map((r) => {
-      const data = parseDate(r.data_proximo);
-      if (!data) return null;
-      let cor, status;
-      if (r.status === 'aplicado') { cor = 'cinza'; status = 'concluido'; }
-      else if (data < hoje) { cor = 'vermelho'; status = 'atrasado'; }
-      else { cor = 'amarelo'; status = 'pendente'; }
-      return {
-        id: `reaj-${r.id}`,
-        tipo: 'reajuste',
-        titulo: `Reajuste — ${r.imovel_codigo || 'Imóvel'} / ${r.inquilino_nome || 'Inquilino'}`,
-        data,
-        cor,
-        status,
-        navegar: `/contratos?reajuste=${r.id}`,
-        meta: { imovel_id: r.imovel_id, contrato_id: r.contrato_id }
-      };
-    })
-    .filter(Boolean);
+  const hoje = meiaNoite(new Date());
+  return reajustes.map((r) => {
+    const data = parseDate(r.data_proximo);
+    if (!data) return null;
+    let cor, status;
+    if (r.status === 'aplicado') { cor = 'cinza'; status = 'concluido'; }
+    else if (data < hoje) { cor = 'vermelho'; status = 'atrasado'; }
+    else { cor = 'amarelo'; status = 'pendente'; }
+    return {
+      id: `reaj-${r.id}`, tipo: 'reajuste',
+      titulo: `Reajuste — ${r.imovel_codigo || 'Imóvel'} / ${r.inquilino_nome || 'Inquilino'}`,
+      data, hora: '', cor, status,
+      navegar: `/contratos?reajuste=${r.id}`, meta: { imovel_id: r.imovel_id }
+    };
+  }).filter(Boolean);
 };
 
 const gerarEventosDespesas = (despesas) => {
-  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
-  return despesas
-    .map((d) => {
-      // Tabela despesas usa "vencimento" (não data_vencimento) e não tem data_pagamento
-      const data = parseDate(d.vencimento || d.data_vencimento);
-      if (!data) return null;
-      const paga = d.status === 'pago';
-      let cor, status;
-      if (paga) { cor = 'cinza'; status = 'concluido'; }
-      else if (data < hoje) { cor = 'vermelho'; status = 'atrasado'; }
-      else { cor = 'laranja'; status = 'pendente'; }
-      return {
-        id: `desp-${d.id}`,
-        tipo: 'despesa',
-        titulo: `Despesa — ${d.tipo || 'Outro'} / ${d.imovel_codigo || 'Geral'}`,
-        data,
-        cor,
-        status,
-        navegar: `/despesas`,
-        meta: { imovel_id: d.imovel_id }
-      };
-    })
-    .filter(Boolean);
-};
-
-const carregarManuais = () => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-};
-
-const salvarManuais = (lista) => {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(lista)); } catch {}
+  const hoje = meiaNoite(new Date());
+  return despesas.map((d) => {
+    const data = parseDate(d.vencimento || d.data_vencimento);
+    if (!data) return null;
+    const paga = d.status === 'pago';
+    let cor, status;
+    if (paga) { cor = 'cinza'; status = 'concluido'; }
+    else if (data < hoje) { cor = 'vermelho'; status = 'atrasado'; }
+    else { cor = 'laranja'; status = 'pendente'; }
+    return {
+      id: `desp-${d.id}`, tipo: 'despesa',
+      titulo: `Conta — ${d.descricao || d.tipo || 'Outro'} / ${d.imovel_codigo || 'Geral'}`,
+      data, hora: '', cor, status,
+      navegar: `/despesas`, meta: { imovel_id: d.imovel_id }
+    };
+  }).filter(Boolean);
 };
 
 const tipoIcon = (tipo) => {
   const map = {
-    aluguel: <Home size={14} />,
-    contrato: <FileText size={14} />,
-    reajuste: <TrendingUp size={14} />,
-    despesa: <Receipt size={14} />,
-    manual: <MapPin size={14} />
+    aluguel: <Home size={13} />, contrato: <FileText size={13} />,
+    reajuste: <TrendingUp size={13} />, despesa: <Receipt size={13} />, manual: <MapPin size={13} />
   };
   return map[tipo] || null;
 };
+
+// Ordena eventos: com hora primeiro (por hora), depois os "dia todo"
+const ordenarPorHora = (lista) => [...lista].sort((a, b) => {
+  if (a.hora && b.hora) return a.hora.localeCompare(b.hora);
+  if (a.hora) return -1;
+  if (b.hora) return 1;
+  return 0;
+});
 
 // ============================================================
 // Componente principal
 // ============================================================
 export default function Agenda() {
   const [auto, setAuto] = useState([]);
-  const [manuais, setManuais] = useState(carregarManuais());
+  const [manuais, setManuais] = useState([]);
   const [loading, setLoading] = useState(true);
   const [imoveis, setImoveis] = useState([]);
-  const [mesAtual, setMesAtual] = useState(() => {
-    const d = new Date();
-    return new Date(d.getFullYear(), d.getMonth(), 1);
-  });
-  const [view, setView] = useState('calendario');
+  const [ref, setRef] = useState(() => meiaNoite(new Date()));
+  const [view, setView] = useState('mes'); // 'dia' | 'semana' | 'mes'
   const [filtroTipo, setFiltroTipo] = useState('');
   const [filtroStatus, setFiltroStatus] = useState('');
   const [filtroImovel, setFiltroImovel] = useState('');
   const [modalAberto, setModalAberto] = useState(false);
   const [editandoId, setEditandoId] = useState(null);
   const [form, setForm] = useState(FORM_MANUAL_INICIAL);
+  const [salvando, setSalvando] = useState(false);
   const [confirmExcluir, setConfirmExcluir] = useState(null);
   const toast = useToast();
   const navigate = useNavigate();
+
+  const fetchManuais = useCallback(async () => {
+    try {
+      const r = await agendaService.listar();
+      setManuais(r.data.map((m) => ({
+        id: `man-${m.id}`, rawId: m.id, tipo: 'manual', subtipo: m.tipo,
+        titulo: m.titulo, data: parseDate(m.data), hora: m.hora ? String(m.hora).slice(0, 5) : '',
+        cor: 'verde', status: 'pendente',
+        meta: { imovel_id: m.imovel_id, manual: true },
+        _raw: m
+      })));
+    } catch {
+      toast.error('Erro ao carregar eventos da agenda');
+    }
+  }, [toast]);
 
   const fetchAuto = useCallback(async () => {
     setLoading(true);
@@ -229,44 +206,16 @@ export default function Agenda() {
     }
   }, [toast]);
 
-  useEffect(() => { fetchAuto(); }, [fetchAuto]);
+  useEffect(() => { fetchAuto(); fetchManuais(); }, [fetchAuto, fetchManuais]);
 
-  const manuaisComoEventos = useMemo(() => manuais.map((m) => {
-    const data = parseDate(m.data);
-    return {
-      ...m,
-      tipo: 'manual',
-      data,
-      cor: 'verde',
-      status: 'pendente',
-      titulo: m.titulo,
-      meta: { imovel_id: m.imovel_id, manual: true }
-    };
-  }), [manuais]);
+  const todosEventos = useMemo(() => [...auto, ...manuais], [auto, manuais]);
 
-  const todosEventos = useMemo(() => [...auto, ...manuaisComoEventos], [auto, manuaisComoEventos]);
-
-  const eventosFiltrados = useMemo(() => {
-    return todosEventos.filter((ev) => {
-      if (filtroTipo && ev.tipo !== filtroTipo) return false;
-      if (filtroStatus && ev.status !== filtroStatus) return false;
-      if (filtroImovel && String(ev.meta?.imovel_id) !== String(filtroImovel)) return false;
-      return true;
-    });
-  }, [todosEventos, filtroTipo, filtroStatus, filtroImovel]);
-
-  // ===== Calendário =====
-  const diasDoMes = useMemo(() => {
-    const ano = mesAtual.getFullYear();
-    const mes = mesAtual.getMonth();
-    const primeiroDia = new Date(ano, mes, 1).getDay();
-    const ultimoDiaMes = new Date(ano, mes + 1, 0).getDate();
-    const dias = [];
-    for (let i = 0; i < primeiroDia; i++) dias.push(null);
-    for (let d = 1; d <= ultimoDiaMes; d++) dias.push(new Date(ano, mes, d));
-    while (dias.length % 7 !== 0) dias.push(null);
-    return dias;
-  }, [mesAtual]);
+  const eventosFiltrados = useMemo(() => todosEventos.filter((ev) => {
+    if (filtroTipo && ev.tipo !== filtroTipo) return false;
+    if (filtroStatus && ev.status !== filtroStatus) return false;
+    if (filtroImovel && String(ev.meta?.imovel_id) !== String(filtroImovel)) return false;
+    return true;
+  }), [todosEventos, filtroTipo, filtroStatus, filtroImovel]);
 
   const eventosPorDia = useMemo(() => {
     const map = new Map();
@@ -276,84 +225,127 @@ export default function Agenda() {
       if (!map.has(key)) map.set(key, []);
       map.get(key).push(ev);
     });
+    map.forEach((v, k) => map.set(k, ordenarPorHora(v)));
     return map;
   }, [eventosFiltrados]);
 
-  const eventosOrdenados = useMemo(() => {
-    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
-    return [...eventosFiltrados].sort((a, b) => {
-      // Atrasados primeiro
-      if (a.status === 'atrasado' && b.status !== 'atrasado') return -1;
-      if (b.status === 'atrasado' && a.status !== 'atrasado') return 1;
-      // Concluídos por último
-      if (a.status === 'concluido' && b.status !== 'concluido') return 1;
-      if (b.status === 'concluido' && a.status !== 'concluido') return -1;
-      return (a.data?.getTime() || 0) - (b.data?.getTime() || 0);
-    });
-  }, [eventosFiltrados]);
+  const eventosDoDia = (d) => eventosPorDia.get(isoFromDate(d)) || [];
 
-  const navegarMes = (delta) => {
-    setMesAtual((m) => new Date(m.getFullYear(), m.getMonth() + delta, 1));
+  // ===== Navegação =====
+  const navegar = (delta) => {
+    setRef((r) => {
+      if (view === 'mes') return new Date(r.getFullYear(), r.getMonth() + delta, 1);
+      if (view === 'semana') return addDays(r, delta * 7);
+      return addDays(r, delta);
+    });
   };
 
-  // ===== Eventos manuais =====
+  const titulo = useMemo(() => {
+    if (view === 'mes') return `${MESES[ref.getMonth()]} de ${ref.getFullYear()}`;
+    if (view === 'dia') return ref.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const ini = inicioSemana(ref);
+    const fim = addDays(ini, 6);
+    const mesmoMes = ini.getMonth() === fim.getMonth();
+    return mesmoMes
+      ? `${ini.getDate()} – ${fim.getDate()} de ${MESES[ini.getMonth()]} ${ini.getFullYear()}`
+      : `${ini.getDate()} ${MESES[ini.getMonth()].slice(0, 3)} – ${fim.getDate()} ${MESES[fim.getMonth()].slice(0, 3)} ${fim.getFullYear()}`;
+  }, [view, ref]);
+
+  // ===== Grade do mês =====
+  const diasDoMes = useMemo(() => {
+    const ano = ref.getFullYear();
+    const mes = ref.getMonth();
+    const primeiro = new Date(ano, mes, 1).getDay();
+    const ultimo = new Date(ano, mes + 1, 0).getDate();
+    const dias = [];
+    for (let i = 0; i < primeiro; i++) dias.push(null);
+    for (let d = 1; d <= ultimo; d++) dias.push(new Date(ano, mes, d));
+    while (dias.length % 7 !== 0) dias.push(null);
+    return dias;
+  }, [ref]);
+
+  const diasDaSemana = useMemo(() => {
+    const ini = inicioSemana(ref);
+    return Array.from({ length: 7 }, (_, i) => addDays(ini, i));
+  }, [ref]);
+
+  // ===== Eventos manuais (CRUD via API) =====
   const abrirNovoManual = () => {
     setEditandoId(null);
-    setForm(FORM_MANUAL_INICIAL);
+    setForm({ ...FORM_MANUAL_INICIAL, data: isoFromDate(view === 'mes' ? new Date() : ref) });
     setModalAberto(true);
   };
 
-  const abrirEditarManual = (m) => {
-    setEditandoId(m.id);
+  const abrirEditarManual = (ev) => {
+    const m = ev._raw;
+    setEditandoId(ev.rawId);
     setForm({
-      titulo: m.titulo || '',
-      data: m.data || '',
-      hora: m.hora || '',
-      imovel_id: m.imovel_id || '',
-      tipo: m.tipo || 'visita',
-      descricao: m.descricao || ''
+      titulo: m.titulo || '', data: m.data ? String(m.data).split('T')[0] : '',
+      hora: m.hora ? String(m.hora).slice(0, 5) : '', imovel_id: m.imovel_id || '',
+      tipo: m.tipo || 'visita', descricao: m.descricao || ''
     });
     setModalAberto(true);
-  };
-
-  const handleSalvarManual = (e) => {
-    e.preventDefault();
-    if (!form.titulo || !form.data) {
-      toast.error('Título e data são obrigatórios');
-      return;
-    }
-    if (editandoId) {
-      const novos = manuais.map((m) => m.id === editandoId ? { ...m, ...form } : m);
-      setManuais(novos);
-      salvarManuais(novos);
-      toast.success('Evento atualizado');
-    } else {
-      const novo = { ...form, id: `manual-${Date.now()}` };
-      const novos = [...manuais, novo];
-      setManuais(novos);
-      salvarManuais(novos);
-      toast.success('Evento criado');
-    }
-    setModalAberto(false);
-  };
-
-  const handleExcluirManual = () => {
-    const novos = manuais.filter((m) => m.id !== confirmExcluir.id);
-    setManuais(novos);
-    salvarManuais(novos);
-    setConfirmExcluir(null);
-    toast.success('Evento excluído');
-  };
-
-  const clicarEvento = (ev) => {
-    if (ev.tipo === 'manual') {
-      abrirEditarManual(ev);
-    } else {
-      navigate(ev.navegar);
-    }
   };
 
   const setF = (campo, valor) => setForm((prev) => ({ ...prev, [campo]: valor }));
+
+  const handleSalvarManual = async (e) => {
+    e.preventDefault();
+    if (!form.titulo.trim() || !form.data) { toast.error('Título e data são obrigatórios'); return; }
+    setSalvando(true);
+    try {
+      const payload = {
+        titulo: form.titulo.trim(), data: form.data, hora: form.hora || undefined,
+        tipo: form.tipo, imovel_id: form.imovel_id || undefined, descricao: form.descricao || undefined
+      };
+      if (editandoId) {
+        await agendaService.atualizar(editandoId, payload);
+        toast.success('Evento atualizado');
+      } else {
+        await agendaService.criar(payload);
+        toast.success('Evento criado');
+      }
+      setModalAberto(false);
+      fetchManuais();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erro ao salvar evento');
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  const handleExcluirManual = async () => {
+    try {
+      await agendaService.excluir(confirmExcluir.rawId);
+      setConfirmExcluir(null);
+      toast.success('Evento excluído');
+      fetchManuais();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erro ao excluir');
+    }
+  };
+
+  const clicarEvento = (ev) => {
+    if (ev.tipo === 'manual') abrirEditarManual(ev);
+    else navigate(ev.navegar);
+  };
+
+  // ===== Chip de evento =====
+  const Chip = ({ ev, comHora }) => (
+    <button
+      type="button"
+      className={`agenda-evt agenda-evt-${ev.cor}${ev.status === 'concluido' ? ' concluido' : ''}`}
+      onClick={(e) => { e.stopPropagation(); clicarEvento(ev); }}
+      title={ev.titulo}
+      style={{ width: '100%' }}
+    >
+      {tipoIcon(ev.tipo)}
+      {comHora && ev.hora && <span style={{ fontWeight: 600, marginRight: 2 }}>{ev.hora}</span>}
+      <span className="agenda-evt-titulo">{ev.titulo}</span>
+    </button>
+  );
+
+  const ehHojeRef = sameDay(ref, new Date());
 
   return (
     <div>
@@ -362,20 +354,17 @@ export default function Agenda() {
           <h1>Agenda</h1>
           <p>{eventosFiltrados.length} evento(s)</p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <div className="agenda-view-toggle">
-            <button
-              type="button"
-              className={`agenda-view-btn${view === 'calendario' ? ' active' : ''}`}
-              onClick={() => setView('calendario')}
-              title="Calendário"
-            ><CalendarIcon size={16} /></button>
-            <button
-              type="button"
-              className={`agenda-view-btn${view === 'lista' ? ' active' : ''}`}
-              onClick={() => setView('lista')}
-              title="Lista"
-            ><List size={16} /></button>
+            {[{ id: 'dia', label: 'Dia' }, { id: 'semana', label: 'Semana' }, { id: 'mes', label: 'Mês' }].map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                className={`agenda-view-btn${view === v.id ? ' active' : ''}`}
+                onClick={() => setView(v.id)}
+                style={{ padding: '6px 12px', fontSize: 13 }}
+              >{v.label}</button>
+            ))}
           </div>
           <button className="btn btn-primary" onClick={abrirNovoManual}>
             <Plus size={16} /> Novo Evento
@@ -383,14 +372,15 @@ export default function Agenda() {
         </div>
       </div>
 
+      {/* Filtros */}
       <div className="filters-row">
         <select className="form-control filter-select" value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value)}>
           <option value="">Todos os tipos</option>
           <option value="aluguel">Aluguel</option>
           <option value="contrato">Contrato</option>
           <option value="reajuste">Reajuste</option>
-          <option value="despesa">Despesa</option>
-          <option value="manual">Manual</option>
+          <option value="despesa">Conta a pagar</option>
+          <option value="manual">Evento manual</option>
         </select>
         <select className="form-control filter-select" value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value)}>
           <option value="">Todos os status</option>
@@ -400,110 +390,101 @@ export default function Agenda() {
         </select>
         <select className="form-control filter-select" value={filtroImovel} onChange={(e) => setFiltroImovel(e.target.value)}>
           <option value="">Todos os imóveis</option>
-          {imoveis.map((im) => (
-            <option key={im.id} value={im.id}>{im.codigo} — {im.endereco}</option>
-          ))}
+          {imoveis.map((im) => <option key={im.id} value={im.id}>{im.codigo} — {im.endereco}</option>)}
         </select>
       </div>
 
-      {loading ? (
-        <div className="loading-spinner"><div className="spinner" /></div>
-      ) : view === 'calendario' ? (
-        <div className="card">
-          <div className="agenda-cal-header">
-            <button className="btn btn-ghost btn-icon" onClick={() => navegarMes(-1)}><ChevronLeft size={18} /></button>
-            <h3 style={{ margin: 0, fontSize: 18 }}>
-              {MESES[mesAtual.getMonth()]} de {mesAtual.getFullYear()}
-            </h3>
-            <button className="btn btn-ghost btn-icon" onClick={() => navegarMes(1)}><ChevronRight size={18} /></button>
-            <button
-              className="btn btn-ghost btn-sm"
-              style={{ marginLeft: 12 }}
-              onClick={() => {
-                const d = new Date();
-                setMesAtual(new Date(d.getFullYear(), d.getMonth(), 1));
-              }}
-            >Hoje</button>
-          </div>
+      {/* Barra de navegação */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="agenda-cal-header">
+          <button className="btn btn-ghost btn-icon" onClick={() => navegar(-1)}><ChevronLeft size={18} /></button>
+          <h3 style={{ margin: 0, fontSize: 17, textTransform: 'capitalize', minWidth: 240, textAlign: 'center' }}>{titulo}</h3>
+          <button className="btn btn-ghost btn-icon" onClick={() => navegar(1)}><ChevronRight size={18} /></button>
+          <button className="btn btn-ghost btn-sm" style={{ marginLeft: 12 }} onClick={() => setRef(meiaNoite(new Date()))}>Hoje</button>
+        </div>
 
-          <div className="agenda-cal-grid agenda-cal-weekdays">
-            {DIAS_SEMANA.map((d) => <div key={d} className="agenda-cal-weekday">{d}</div>)}
-          </div>
-
-          <div className="agenda-cal-grid">
-            {diasDoMes.map((d, i) => {
-              if (!d) return <div key={`empty-${i}`} className="agenda-cal-cell empty" />;
-              const ehHoje = sameDay(d, new Date());
-              const evs = eventosPorDia.get(isoFromDate(d)) || [];
+        {loading ? (
+          <div className="loading-spinner"><div className="spinner" /></div>
+        ) : view === 'mes' ? (
+          <>
+            <div className="agenda-cal-grid agenda-cal-weekdays">
+              {DIAS_SEMANA.map((d) => <div key={d} className="agenda-cal-weekday">{d}</div>)}
+            </div>
+            <div className="agenda-cal-grid">
+              {diasDoMes.map((d, i) => {
+                if (!d) return <div key={`empty-${i}`} className="agenda-cal-cell empty" />;
+                const evs = eventosDoDia(d);
+                return (
+                  <div key={isoFromDate(d)} className={`agenda-cal-cell${sameDay(d, new Date()) ? ' today' : ''}`}>
+                    <div className="agenda-cal-daynum" style={{ cursor: 'pointer' }} onClick={() => { setRef(d); setView('dia'); }}>{d.getDate()}</div>
+                    <div className="agenda-cal-events">
+                      {evs.slice(0, 3).map((ev) => <Chip key={ev.id} ev={ev} />)}
+                      {evs.length > 3 && (
+                        <button type="button" className="agenda-evt-mais" onClick={() => { setRef(d); setView('dia'); }}>+ {evs.length - 3} mais</button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        ) : view === 'semana' ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6, padding: 8 }}>
+            {diasDaSemana.map((d) => {
+              const evs = eventosDoDia(d);
+              const hoje = sameDay(d, new Date());
               return (
-                <div key={isoFromDate(d)} className={`agenda-cal-cell${ehHoje ? ' today' : ''}`}>
-                  <div className="agenda-cal-daynum">{d.getDate()}</div>
-                  <div className="agenda-cal-events">
-                    {evs.slice(0, 3).map((ev) => (
-                      <button
-                        key={ev.id}
-                        type="button"
-                        className={`agenda-evt agenda-evt-${ev.cor}${ev.status === 'concluido' ? ' concluido' : ''}`}
-                        onClick={() => clicarEvento(ev)}
-                        title={ev.titulo}
-                      >
-                        {tipoIcon(ev.tipo)}
-                        <span className="agenda-evt-titulo">{ev.titulo}</span>
-                      </button>
-                    ))}
-                    {evs.length > 3 && (
-                      <button
-                        type="button"
-                        className="agenda-evt-mais"
-                        onClick={() => setView('lista')}
-                      >+ {evs.length - 3} mais</button>
-                    )}
+                <div key={isoFromDate(d)} style={{ border: '1px solid var(--gray-200)', borderRadius: 8, overflow: 'hidden', minHeight: 320, background: hoje ? 'var(--info-light)' : 'var(--card-bg, #fff)' }}>
+                  <div onClick={() => { setRef(d); setView('dia'); }} style={{ padding: '8px 6px', textAlign: 'center', cursor: 'pointer', borderBottom: '1px solid var(--gray-200)', background: hoje ? 'var(--info)' : 'transparent', color: hoje ? '#fff' : 'inherit' }}>
+                    <div style={{ fontSize: 11, textTransform: 'uppercase', opacity: 0.8 }}>{DIAS_SEMANA[d.getDay()]}</div>
+                    <div style={{ fontSize: 18, fontWeight: 700 }}>{d.getDate()}</div>
+                  </div>
+                  <div style={{ padding: 5, display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 360, overflowY: 'auto' }}>
+                    {evs.length === 0
+                      ? <div style={{ fontSize: 11, color: 'var(--gray-400)', textAlign: 'center', padding: 8 }}>—</div>
+                      : evs.map((ev) => <Chip key={ev.id} ev={ev} comHora />)}
                   </div>
                 </div>
               );
             })}
           </div>
-        </div>
-      ) : (
-        <div className="card">
-          {eventosOrdenados.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-icon"><CalendarIcon size={48} /></div>
-              <h3>Nenhum evento encontrado</h3>
-              <p>Ajuste os filtros ou crie um novo evento</p>
+        ) : (
+          // ===== Dia =====
+          <div style={{ padding: 16 }}>
+            <div style={{ background: ehHojeRef ? 'var(--info-light)' : 'var(--gray-50)', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }}>
+              <strong style={{ textTransform: 'capitalize' }}>
+                {ref.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
+              </strong>
+              {ehHojeRef && <span className="badge badge-info" style={{ marginLeft: 8 }}>Hoje</span>}
             </div>
-          ) : (
-            <ul className="agenda-lista">
-              {eventosOrdenados.map((ev) => (
-                <li
-                  key={ev.id}
-                  className={`agenda-lista-item agenda-evt-${ev.cor}${ev.status === 'concluido' ? ' concluido' : ''}${ev.status === 'atrasado' ? ' atrasado' : ''}`}
-                >
-                  <button type="button" className="agenda-lista-btn" onClick={() => clicarEvento(ev)}>
-                    <div className="agenda-lista-icon">{tipoIcon(ev.tipo)}</div>
-                    <div className="agenda-lista-info">
-                      <div className="agenda-lista-titulo">{ev.titulo}</div>
-                      <div className="agenda-lista-meta">
-                        {formatData(ev.data)} {ev.hora ? `às ${ev.hora}` : ''} ·{' '}
-                        <span className={`agenda-status agenda-status-${ev.status}`}>
-                          {ev.status === 'atrasado' ? 'Em atraso' : ev.status === 'concluido' ? 'Concluído' : 'Pendente'}
-                        </span>
+            {eventosDoDia(ref).length === 0 ? (
+              <div className="empty-state" style={{ padding: 32 }}>
+                <p style={{ color: 'var(--gray-500)' }}>Nenhum evento neste dia.</p>
+                <button className="btn btn-ghost btn-sm" onClick={abrirNovoManual}><Plus size={14} /> Adicionar evento</button>
+              </div>
+            ) : (
+              <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {eventosDoDia(ref).map((ev) => (
+                  <li key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 10px', border: '1px solid var(--gray-200)', borderRadius: 8 }}>
+                    <div style={{ width: 64, fontSize: 13, fontWeight: 600, color: 'var(--gray-600)', flexShrink: 0 }}>
+                      {ev.hora || 'Dia todo'}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}><Chip ev={ev} /></div>
+                    {ev.tipo === 'manual' && (
+                      <div className="table-actions">
+                        <button className="btn btn-ghost btn-sm btn-icon" onClick={() => abrirEditarManual(ev)} title="Editar"><Pencil size={14} /></button>
+                        <button className="btn btn-outline-danger btn-sm btn-icon" onClick={() => setConfirmExcluir(ev)} title="Excluir"><Trash2 size={14} /></button>
                       </div>
-                    </div>
-                  </button>
-                  {ev.tipo === 'manual' && (
-                    <div className="table-actions">
-                      <button className="btn btn-ghost btn-sm btn-icon" onClick={() => abrirEditarManual(ev)} title="Editar"><Pencil size={14} /></button>
-                      <button className="btn btn-outline-danger btn-sm btn-icon" onClick={() => setConfirmExcluir(ev)} title="Excluir"><Trash2 size={14} /></button>
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
 
+      {/* Modal evento manual */}
       <Modal
         isOpen={modalAberto}
         onClose={() => setModalAberto(false)}
@@ -511,7 +492,7 @@ export default function Agenda() {
         footer={
           <>
             <button className="btn btn-ghost" onClick={() => setModalAberto(false)}>Cancelar</button>
-            <button className="btn btn-primary" onClick={handleSalvarManual}>Salvar</button>
+            <button className="btn btn-primary" onClick={handleSalvarManual} disabled={salvando}>{salvando ? 'Salvando...' : 'Salvar'}</button>
           </>
         }
       >

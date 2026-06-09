@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import Layout from './components/Layout';
+import ErrorBoundary from './components/ErrorBoundary';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Agenda from './pages/Agenda';
@@ -11,6 +12,8 @@ import Imoveis from './pages/Imoveis';
 import Contratos from './pages/Contratos';
 import Pagamentos from './pages/Pagamentos';
 import Despesas from './pages/Despesas';
+import Recibos from './pages/Recibos';
+import Inadimplencia from './pages/Inadimplencia';
 import Relatorios from './pages/Relatorios';
 import Usuarios from './pages/Usuarios';
 
@@ -28,7 +31,7 @@ function PrivateRoute({ children, adminOnly = false }) {
   if (!usuario) return <Navigate to="/login" replace />;
   if (adminOnly && !isAdmin) return <Navigate to="/" replace />;
 
-  return <Layout>{children}</Layout>;
+  return <Layout><ErrorBoundary>{children}</ErrorBoundary></Layout>;
 }
 
 function PublicRoute({ children }) {
@@ -59,6 +62,8 @@ export default function App() {
             <Route path="/contratos" element={<PrivateRoute><Contratos /></PrivateRoute>} />
             <Route path="/pagamentos" element={<PrivateRoute><Pagamentos /></PrivateRoute>} />
             <Route path="/despesas" element={<PrivateRoute><Despesas /></PrivateRoute>} />
+            <Route path="/recibos" element={<PrivateRoute><Recibos /></PrivateRoute>} />
+            <Route path="/inadimplencia" element={<PrivateRoute><Inadimplencia /></PrivateRoute>} />
             <Route path="/relatorios" element={<PrivateRoute><Relatorios /></PrivateRoute>} />
             <Route path="/usuarios" element={<PrivateRoute adminOnly><Usuarios /></PrivateRoute>} />
             <Route path="/inquilinos" element={<Navigate to="/imoveis" replace />} />

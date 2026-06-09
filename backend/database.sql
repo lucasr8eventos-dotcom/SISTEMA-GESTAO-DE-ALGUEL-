@@ -85,15 +85,34 @@ CREATE TABLE IF NOT EXISTS pagamentos (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Tipos/categorias de conta a pagar (cadastráveis pelo usuário)
+CREATE TABLE IF NOT EXISTS despesa_tipos (
+    id SERIAL PRIMARY KEY,
+    codigo VARCHAR(60) UNIQUE NOT NULL,
+    nome VARCHAR(120) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Contas a pagar (despesas fixas e variáveis)
 CREATE TABLE IF NOT EXISTS despesas (
     id SERIAL PRIMARY KEY,
-    imovel_id INTEGER NOT NULL REFERENCES imoveis(id) ON DELETE RESTRICT,
-    tipo VARCHAR(50) NOT NULL CHECK (tipo IN ('iptu', 'condominio', 'agua', 'energia', 'manutencao', 'seguro', 'outros')),
-    valor DECIMAL(10,2) NOT NULL,
+    imovel_id INTEGER REFERENCES imoveis(id) ON DELETE RESTRICT, -- opcional: conta pode ser "geral"
+    tipo VARCHAR(60) NOT NULL, -- código da categoria (livre, ver despesa_tipos)
+    valor DECIMAL(12,2) NOT NULL,
     vencimento DATE NOT NULL,
-    status VARCHAR(50) NOT NULL DEFAULT 'pendente' CHECK (status IN ('pago', 'pendente', 'atrasado')),
+    status VARCHAR(50) NOT NULL DEFAULT 'pendente' CHECK (status IN ('pago', 'pendente', 'atrasado', 'parcial')),
     descricao VARCHAR(255),
     observacoes TEXT,
+    -- Baixa / informar pagamento
+    data_pagamento DATE,
+    valor_pago DECIMAL(12,2),
+    forma_pagamento VARCHAR(30),
+    juros DECIMAL(12,2) DEFAULT 0,
+    multa DECIMAL(12,2) DEFAULT 0,
+    desconto DECIMAL(12,2) DEFAULT 0,
+    -- Parcelamento / recorrência
+    parcela_num INTEGER DEFAULT 1,
+    parcela_total INTEGER DEFAULT 1,
     recorrencia_id INTEGER, -- agrupa despesas criadas em série
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -110,6 +129,73 @@ CREATE TABLE IF NOT EXISTS reajustes (
     novo_valor DECIMAL(10,2) NOT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'pendente' CHECK (status IN ('pendente', 'avisado', 'aplicado')),
     observacoes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Recebedores salvos (quem recebe — empresa/pessoa que emite o recibo)
+CREATE TABLE IF NOT EXISTS recibo_recebedores (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR(255) NOT NULL,
+    documento VARCHAR(20),
+    endereco TEXT,
+    telefone VARCHAR(20),
+    whatsapp VARCHAR(20),
+    email VARCHAR(255),
+    site VARCHAR(255),
+    logo_url VARCHAR(500),
+    padrao BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Pagadores salvos (quem paga)
+CREATE TABLE IF NOT EXISTS recibo_pagadores (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR(255) NOT NULL,
+    documento VARCHAR(20),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Recibos gerados (guarda um "snapshot" dos dados na hora da emissão,
+-- para que editar/excluir um recebedor não altere recibos já emitidos)
+CREATE TABLE IF NOT EXISTS recibos (
+    id SERIAL PRIMARY KEY,
+    numero INTEGER NOT NULL,
+    recebedor_id INTEGER REFERENCES recibo_recebedores(id) ON DELETE SET NULL,
+    pagador_id INTEGER REFERENCES recibo_pagadores(id) ON DELETE SET NULL,
+    recebedor_nome VARCHAR(255) NOT NULL,
+    recebedor_documento VARCHAR(20),
+    recebedor_endereco TEXT,
+    recebedor_telefone VARCHAR(20),
+    recebedor_whatsapp VARCHAR(20),
+    recebedor_email VARCHAR(255),
+    recebedor_site VARCHAR(255),
+    recebedor_logo_url VARCHAR(500),
+    pagador_nome VARCHAR(255) NOT NULL,
+    pagador_documento VARCHAR(20),
+    valor DECIMAL(12,2) NOT NULL,
+    valor_extenso TEXT,
+    forma_pagamento VARCHAR(30),
+    data_pagamento DATE NOT NULL,
+    referente TEXT NOT NULL,
+    local VARCHAR(255),
+    com_canhoto BOOLEAN NOT NULL DEFAULT true,
+    usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Eventos manuais da Agenda (vistorias, visitas, reuniões, etc.) — salvos no banco
+CREATE TABLE IF NOT EXISTS agenda_eventos (
+    id SERIAL PRIMARY KEY,
+    titulo VARCHAR(255) NOT NULL,
+    data DATE NOT NULL,
+    hora TIME,
+    imovel_id INTEGER REFERENCES imoveis(id) ON DELETE SET NULL,
+    tipo VARCHAR(40) NOT NULL DEFAULT 'outro',
+    descricao TEXT,
+    usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -145,6 +231,9 @@ CREATE INDEX IF NOT EXISTS idx_despesas_status ON despesas(status);
 CREATE INDEX IF NOT EXISTS idx_despesas_imovel ON despesas(imovel_id);
 CREATE INDEX IF NOT EXISTS idx_reajustes_data_proximo ON reajustes(data_proximo);
 CREATE INDEX IF NOT EXISTS idx_reajustes_status ON reajustes(status);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_recibos_numero ON recibos(numero);
+CREATE INDEX IF NOT EXISTS idx_agenda_data ON agenda_eventos(data);
+CREATE INDEX IF NOT EXISTS idx_recibos_created ON recibos(created_at);
 CREATE INDEX IF NOT EXISTS idx_log_usuario ON log_atividades(usuario_id);
 CREATE INDEX IF NOT EXISTS idx_log_created ON log_atividades(created_at);
 CREATE INDEX IF NOT EXISTS idx_despesas_recorrencia ON despesas(recorrencia_id);
@@ -209,6 +298,12 @@ DROP TRIGGER IF EXISTS trg_despesas_updated_at ON despesas;
 CREATE TRIGGER trg_despesas_updated_at BEFORE UPDATE ON despesas FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 DROP TRIGGER IF EXISTS trg_reajustes_updated_at ON reajustes;
 CREATE TRIGGER trg_reajustes_updated_at BEFORE UPDATE ON reajustes FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS trg_recibo_recebedores_updated_at ON recibo_recebedores;
+CREATE TRIGGER trg_recibo_recebedores_updated_at BEFORE UPDATE ON recibo_recebedores FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS trg_recibo_pagadores_updated_at ON recibo_pagadores;
+CREATE TRIGGER trg_recibo_pagadores_updated_at BEFORE UPDATE ON recibo_pagadores FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS trg_agenda_eventos_updated_at ON agenda_eventos;
+CREATE TRIGGER trg_agenda_eventos_updated_at BEFORE UPDATE ON agenda_eventos FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================
 -- VIEWS
@@ -246,6 +341,17 @@ ORDER BY dias_atraso DESC;
 INSERT INTO usuarios (nome, email, senha, perfil, status) VALUES
 ('Administrador', 'admin@sistema.com', '$2a$10$Mr3zId.1uxChJYHuP7zXk.rnsHpbZWl7p0WMuSSvwmZIuy6mhrGf2', 'admin', 'ativo')
 ON CONFLICT (email) DO NOTHING;
+
+-- Categorias padrão de contas a pagar
+INSERT INTO despesa_tipos (codigo, nome) VALUES
+('iptu', 'IPTU'),
+('condominio', 'Condomínio'),
+('agua', 'Água'),
+('energia', 'Energia'),
+('manutencao', 'Manutenção'),
+('seguro', 'Seguro'),
+('outros', 'Outros')
+ON CONFLICT (codigo) DO NOTHING;
 
 -- Imóveis de exemplo
 INSERT INTO imoveis (codigo, tipo, endereco, valor_sem_desconto, valor_com_desconto, dia_vencimento, status, numero_iptu) VALUES

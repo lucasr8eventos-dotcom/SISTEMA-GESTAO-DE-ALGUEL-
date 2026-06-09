@@ -82,13 +82,22 @@ export const pagamentosService = {
   recibosLote: (params) => api.get('/pagamentos/recibos-lote', { params, responseType: 'blob' })
 };
 
-// ===== DESPESAS =====
+// ===== DESPESAS / CONTAS A PAGAR =====
 export const despesasService = {
   listar: (params) => api.get('/despesas', { params }),
   criar: (dados) => api.post('/despesas', dados),
   atualizar: (id, dados) => api.put(`/despesas/${id}`, dados),
   excluir: (id, params) => api.delete(`/despesas/${id}`, { params }),
+  pagar: (id, dados) => api.post(`/despesas/${id}/pagar`, dados),
+  reabrir: (id) => api.post(`/despesas/${id}/reabrir`),
   exportar: (formato, params) => api.get(`/despesas/exportar/${formato}`, { params, responseType: 'blob' })
+};
+
+// ===== CATEGORIAS DE CONTAS A PAGAR =====
+export const despesaTiposService = {
+  listar: () => api.get('/despesa-tipos'),
+  criar: (nome) => api.post('/despesa-tipos', { nome }),
+  excluir: (id) => api.delete(`/despesa-tipos/${id}`)
 };
 
 // ===== REAJUSTES =====
@@ -97,6 +106,38 @@ export const reajustesService = {
   criar: (dados) => api.post('/reajustes', dados),
   atualizar: (id, dados) => api.put(`/reajustes/${id}`, dados),
   excluir: (id) => api.delete(`/reajustes/${id}`)
+};
+
+// ===== RECIBOS =====
+export const recibosService = {
+  listar: () => api.get('/recibos'),
+  proximoNumero: () => api.get('/recibos/proximo-numero'),
+  criar: (dados) => api.post('/recibos', dados),
+  excluir: (id) => api.delete(`/recibos/${id}`),
+  pdf: (id) => api.get(`/recibos/${id}/pdf`, { responseType: 'blob' }),
+  uploadLogo: (file) => {
+    const fd = new FormData();
+    fd.append('logo', file);
+    return api.post('/recibos/logo', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
+  // Recebedores
+  listarRecebedores: () => api.get('/recibos/recebedores'),
+  criarRecebedor: (dados) => api.post('/recibos/recebedores', dados),
+  atualizarRecebedor: (id, dados) => api.put(`/recibos/recebedores/${id}`, dados),
+  excluirRecebedor: (id) => api.delete(`/recibos/recebedores/${id}`),
+  // Pagadores
+  listarPagadores: () => api.get('/recibos/pagadores'),
+  criarPagador: (dados) => api.post('/recibos/pagadores', dados),
+  atualizarPagador: (id, dados) => api.put(`/recibos/pagadores/${id}`, dados),
+  excluirPagador: (id) => api.delete(`/recibos/pagadores/${id}`)
+};
+
+// ===== AGENDA (eventos manuais) =====
+export const agendaService = {
+  listar: () => api.get('/agenda-eventos'),
+  criar: (dados) => api.post('/agenda-eventos', dados),
+  atualizar: (id, dados) => api.put(`/agenda-eventos/${id}`, dados),
+  excluir: (id) => api.delete(`/agenda-eventos/${id}`)
 };
 
 // ===== DASHBOARD =====
@@ -109,6 +150,7 @@ export const dashboardService = {
 export const relatoriosService = {
   mensal: (params) => api.get('/relatorios/mensal', { params }),
   inadimplencia: () => api.get('/relatorios/inadimplencia'),
+  inadimplenciaConsolidada: () => api.get('/relatorios/inadimplencia/consolidada'),
   imoveisVagos: () => api.get('/relatorios/imoveis-vagos'),
   contratosVencendo: (params) => api.get('/relatorios/contratos-vencendo', { params }),
   despesas: (params) => api.get('/relatorios/despesas', { params }),
