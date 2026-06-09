@@ -15,6 +15,10 @@
   --warning-dark: #d68910;
   --info: #3498db;
   --info-light: #d1ecf1;
+  --info-dark: #1a6a8a;
+  --orange: #f97316;
+  --orange-light: #ffedd5;
+  --orange-dark: #9a3412;
   --gray-50: #f8fafc;
   --gray-100: #f1f5f9;
   --gray-200: #e2e8f0;
@@ -30,10 +34,67 @@
   --topbar-height: 64px;
   --radius: 8px;
   --radius-lg: 12px;
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
-  --shadow: 0 4px 16px rgba(0,0,0,0.10);
-  --shadow-lg: 0 8px 32px rgba(0,0,0,0.12);
+  --shadow-sm: 0 1px 3px rgba(15,23,42,0.08);
+  --shadow: 0 4px 16px rgba(15,23,42,0.10);
+  --shadow-lg: 0 8px 32px rgba(15,23,42,0.14);
   --transition: 0.2s ease;
+  /* Tokens semânticos de superfície (usados pelo tema escuro) */
+  --surface: var(--white);
+  --surface-2: var(--gray-50);
+  --border: var(--gray-200);
+  --body-bg: var(--gray-100);
+  color-scheme: light;
+}
+
+/* ============================================================
+   TEMA ESCURO — remapeia os tokens; o app inteiro usa var(--*),
+   então a troca é consistente em toda a interface.
+   ============================================================ */
+[data-theme="dark"] {
+  --primary: #3b6cab;
+  --primary-light: #4d80c4;
+  --primary-dark: #2d5282;
+  --accent: #4a9eed;
+  --accent-light: #7ab8f0;
+
+  --success: #34d399;
+  --success-light: rgba(52,211,153,0.16);
+  --success-dark: #4ade80;
+  --danger: #f87171;
+  --danger-light: rgba(248,113,113,0.16);
+  --danger-dark: #fca5a5;
+  --warning: #fbbf24;
+  --warning-light: rgba(251,191,36,0.16);
+  --warning-dark: #fcd34d;
+  --info: #60a5fa;
+  --info-light: rgba(96,165,250,0.16);
+  --info-dark: #93c5fd;
+  --orange: #fb923c;
+  --orange-light: rgba(251,146,60,0.16);
+  --orange-dark: #fdba74;
+
+  /* Escala de cinza invertida: 50 = fundo elevado escuro … 900 = texto forte claro */
+  --gray-50:  #1c2738;
+  --gray-100: #0f172a;
+  --gray-200: #2b3a52;
+  --gray-300: #3a4a64;
+  --gray-400: #6b7888;
+  --gray-500: #94a3b8;
+  --gray-600: #b4c0d0;
+  --gray-700: #d2dae5;
+  --gray-800: #e8edf4;
+  --gray-900: #f8fafc;
+  --white: #1a2435;
+
+  --surface: #1a2435;
+  --surface-2: #1f2b3e;
+  --border: #2b3a52;
+  --body-bg: #0f172a;
+
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.40);
+  --shadow: 0 4px 16px rgba(0,0,0,0.45);
+  --shadow-lg: 0 10px 36px rgba(0,0,0,0.55);
+  color-scheme: dark;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -42,10 +103,11 @@ html { font-size: 15px; scroll-behavior: smooth; }
 
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: var(--gray-100);
+  background: var(--body-bg);
   color: var(--gray-800);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  transition: background var(--transition), color var(--transition);
 }
 
 a { color: inherit; text-decoration: none; }
@@ -277,6 +339,25 @@ input, select, textarea {
 .user-info .user-name { font-size: 14px; font-weight: 500; }
 .user-info .user-role { font-size: 12px; color: var(--gray-500); }
 
+.theme-toggle {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--gray-600);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+.theme-toggle:hover {
+  background: var(--gray-100);
+  color: var(--primary);
+  border-color: var(--gray-300);
+}
+
 /* ===== BUTTONS ===== */
 .btn {
   display: inline-flex;
@@ -481,9 +562,9 @@ tbody tr:last-child td { border-bottom: none; }
 .badge-success { background: var(--success-light); color: var(--success-dark); }
 .badge-danger  { background: var(--danger-light);  color: var(--danger-dark);  }
 .badge-warning { background: var(--warning-light); color: var(--warning-dark); }
-.badge-info    { background: var(--info-light);    color: #1a6a8a;             }
+.badge-info    { background: var(--info-light);    color: var(--info-dark);    }
 .badge-gray    { background: var(--gray-100);      color: var(--gray-600);     }
-.badge-primary { background: #dbeafe;              color: var(--primary);      }
+.badge-primary { background: var(--info-light);    color: var(--info-dark);    }
 
 /* ===== FORMS ===== */
 .form-group { margin-bottom: 16px; }
@@ -1466,6 +1547,66 @@ textarea.form-control { min-height: 80px; resize: vertical; }
 /* ===== ROW DANGER (despesa próximo do vencimento) ===== */
 .row-warn td { background: rgba(245, 158, 11, 0.05); }
 .row-danger td { background: rgba(239, 68, 68, 0.05); }
+.row-success td { background: rgba(46, 204, 113, 0.05); }
+
+/* Linhas tonalizadas para relatórios (translúcidas → servem nos 2 temas) */
+.tr-pago td     { background: rgba(46, 204, 113, 0.08); }
+.tr-atraso td   { background: rgba(239, 68, 68, 0.08); }
+.tr-pendente td { background: rgba(245, 158, 11, 0.10); }
+
+/* ============================================================
+   AJUSTES FINOS DO TEMA ESCURO
+   (regras que tinham cor fixa e não adaptavam via tokens)
+   ============================================================ */
+
+/* Agenda — texto dos eventos mais claro no escuro para contraste */
+[data-theme="dark"] .agenda-evt-azul     { background: rgba(96,165,250,0.20); color: #bfdbfe; }
+[data-theme="dark"] .agenda-evt-vermelho { background: rgba(248,113,113,0.22); color: #fecaca; }
+[data-theme="dark"] .agenda-evt-amarelo  { background: rgba(251,191,36,0.20); color: #fde68a; }
+[data-theme="dark"] .agenda-evt-laranja  { background: rgba(251,146,60,0.20); color: #fed7aa; }
+[data-theme="dark"] .agenda-evt-verde    { background: rgba(52,211,153,0.20); color: #bbf7d0; }
+[data-theme="dark"] .agenda-evt-cinza    { background: rgba(148,163,184,0.14); color: var(--gray-500); }
+[data-theme="dark"] .agenda-status-atrasado { color: #fca5a5; }
+[data-theme="dark"] .agenda-cal-cell.today  { background: rgba(96,165,250,0.10); }
+[data-theme="dark"] .agenda-lista-item.agenda-evt-vermelho { background: rgba(248,113,113,0.07); }
+
+/* Status pills ativos no escuro */
+[data-theme="dark"] .status-pill-success.active { background: rgba(52,211,153,0.16); color: #bbf7d0; }
+[data-theme="dark"] .status-pill-warning.active { background: rgba(251,191,36,0.16); color: #fde68a; }
+[data-theme="dark"] .status-pill-danger.active  { background: rgba(248,113,113,0.16); color: #fecaca; }
+[data-theme="dark"] .status-pill-info.active    { background: rgba(96,165,250,0.16); color: #bfdbfe; }
+[data-theme="dark"] .status-pill-orange.active  { background: rgba(251,146,60,0.16); color: #fed7aa; }
+
+/* Alerts no escuro (definições inferiores usavam cor fixa) */
+[data-theme="dark"] .alert-info    { background: rgba(96,165,250,0.12); color: #bfdbfe; border-color: rgba(96,165,250,0.25); }
+[data-theme="dark"] .alert-warning { background: rgba(251,191,36,0.12); color: #fde68a; border-color: rgba(251,191,36,0.25); }
+
+/* Toast no escuro: superfície escura sólida com texto claro */
+[data-theme="dark"] .toast         { background: #243044; color: #f1f5f9; border: 1px solid var(--border); }
+[data-theme="dark"] .toast-success { background: #14532d; color: #d1fae5; }
+[data-theme="dark"] .toast-danger  { background: #7f1d1d; color: #fee2e2; }
+[data-theme="dark"] .toast-warning { background: #78350f; color: #fef3c7; }
+
+/* Sidebar como superfície escura no tema escuro (mais sóbria que o azul vivo) */
+[data-theme="dark"] .sidebar { background: #131c2e; border-right: 1px solid var(--border); }
+[data-theme="dark"] .sidebar-logo,
+[data-theme="dark"] .sidebar-footer { border-color: rgba(255,255,255,0.08); }
+[data-theme="dark"] .nav-item.active { background: rgba(96,165,250,0.16); border-left-color: var(--accent); }
+
+/* Gráficos (recharts) no escuro */
+[data-theme="dark"] .recharts-text { fill: var(--gray-500); }
+[data-theme="dark"] .recharts-cartesian-grid line { stroke: var(--gray-200); }
+[data-theme="dark"] .recharts-default-tooltip {
+  background: var(--surface) !important;
+  border-color: var(--border) !important;
+  border-radius: var(--radius);
+}
+[data-theme="dark"] .recharts-default-tooltip .recharts-tooltip-label,
+[data-theme="dark"] .recharts-default-tooltip .recharts-tooltip-item { color: var(--gray-800) !important; }
+
+/* Inputs de data/hora: ícone do calendário visível no escuro */
+[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator,
+[data-theme="dark"] input[type="time"]::-webkit-calendar-picker-indicator { filter: invert(0.85); }
 
 @media (max-width: 768px) {
   .filter-bar-fields { width: 100%; }

@@ -7,7 +7,7 @@ import { Building2, CheckCircle2, KeyRound, DollarSign, Banknote, AlertCircle, A
 
 const StatCard = ({ icon, value, label, color, onClick }) => (
   <div className="stat-card" onClick={onClick} style={{ cursor: onClick ? 'pointer' : 'default' }}>
-    <div className="stat-icon" style={{ background: color + '18', color }}>
+    <div className="stat-icon" style={{ background: `color-mix(in srgb, ${color} 15%, transparent)`, color }}>
       {icon}
     </div>
     <div className="stat-info">

@@ -25,7 +25,7 @@ const StatCard = ({ icon, value, label, color, active, onClick }) => (
     onClick={onClick}
     style={{ cursor: 'pointer' }}
   >
-    <div className="stat-icon" style={{ background: color + '18', color }}>{icon}</div>
+    <div className="stat-icon" style={{ background: `color-mix(in srgb, ${color} 15%, transparent)`, color }}>{icon}</div>
     <div className="stat-info">
       <div className="stat-value">{value}</div>
       <div className="stat-label">{label}</div>
