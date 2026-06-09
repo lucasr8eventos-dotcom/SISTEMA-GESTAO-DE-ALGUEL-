@@ -1235,45 +1235,43 @@ app.get('/api/despesas', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/despesas', authenticateToken, [
-  body('imovel_id').isInt({ min: 1 }),
-  body('tipo').isIn(['iptu', 'condominio', 'agua', 'energia', 'manutencao', 'seguro', 'outros']),
+  body('imovel_id').optional({ values: 'falsy' }).isInt({ min: 1 }),
+  body('tipo').trim().notEmpty().withMessage('Categoria é obrigatória'),
   body('valor').isFloat({ min: 0 }),
   body('vencimento').isDate(),
-  body('status').isIn(['pago', 'pendente', 'atrasado']),
-  body('recorrencia').optional().isIn(['nenhuma', 'mensal', 'anual'])
+  body('status').isIn(['pago', 'pendente', 'atrasado', 'parcial']),
+  body('recorrencia_meses').optional({ values: 'falsy' }).isInt({ min: 1, max: 120 })
 ], validate, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { imovel_id, tipo, valor, vencimento, status, descricao, observacoes, recorrencia } = req.body;
+    const { imovel_id, tipo, valor, vencimento, status, descricao, observacoes } = req.body;
+    // Quantas parcelas/meses repetir (1 = sem recorrência). Limite de segurança 120.
+    const total = Math.min(Math.max(parseInt(req.body.recorrencia_meses, 10) || 1, 1), 120);
+    const imovel = imovel_id || null;
 
     await client.query('BEGIN');
 
-    // Cria primeira despesa
+    // Primeira parcela
     const result = await client.query(
-      'INSERT INTO despesas (imovel_id, tipo, valor, vencimento, status, descricao, observacoes) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-      [imovel_id, tipo, valor, vencimento, status, descricao, observacoes]
+      `INSERT INTO despesas (imovel_id, tipo, valor, vencimento, status, descricao, observacoes, parcela_num, parcela_total)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,1,$8) RETURNING *`,
+      [imovel, tipo, valor, vencimento, status, descricao, observacoes, total]
     );
-
     const primeira = result.rows[0];
-    let ocorrencias = [primeira];
+    const ocorrencias = [primeira];
 
-    if (recorrencia === 'mensal' || recorrencia === 'anual') {
-      // Marca série pelo id da primeira despesa
+    if (total > 1) {
+      // Agrupa a série pelo id da primeira parcela
       await client.query('UPDATE despesas SET recorrencia_id = $1 WHERE id = $1', [primeira.id]);
-
       const dataBase = new Date(vencimento);
-      const totalGeradas = recorrencia === 'mensal' ? 11 : 1; // 12 totais (mensal) ou 2 totais (anual)
-
-      for (let i = 1; i <= totalGeradas; i++) {
+      for (let i = 1; i < total; i++) {
         const d = new Date(dataBase);
-        if (recorrencia === 'mensal') d.setMonth(d.getMonth() + i);
-        else d.setFullYear(d.getFullYear() + i);
+        d.setMonth(d.getMonth() + i);
         const futuraISO = d.toISOString().split('T')[0];
-
         const r = await client.query(
-          `INSERT INTO despesas (imovel_id, tipo, valor, vencimento, status, descricao, observacoes, recorrencia_id)
-           VALUES ($1,$2,$3,$4,'pendente',$5,$6,$7) RETURNING *`,
-          [imovel_id, tipo, valor, futuraISO, descricao, observacoes, primeira.id]
+          `INSERT INTO despesas (imovel_id, tipo, valor, vencimento, status, descricao, observacoes, parcela_num, parcela_total, recorrencia_id)
+           VALUES ($1,$2,$3,$4,'pendente',$5,$6,$7,$8,$9) RETURNING *`,
+          [imovel, tipo, valor, futuraISO, descricao, observacoes, i + 1, total, primeira.id]
         );
         ocorrencias.push(r.rows[0]);
       }
@@ -1281,7 +1279,7 @@ app.post('/api/despesas', authenticateToken, [
 
     await client.query('COMMIT');
     await logAtividade(req.user.id, 'criar_despesa', 'despesas', primeira.id,
-      recorrencia && recorrencia !== 'nenhuma' ? `${tipo}+${recorrencia}` : tipo, req.ip);
+      total > 1 ? `${tipo} (${total}x)` : tipo, req.ip);
 
     res.status(201).json({ ...primeira, ocorrencias_criadas: ocorrencias.length });
   } catch (error) {
@@ -1295,11 +1293,11 @@ app.post('/api/despesas', authenticateToken, [
 
 app.put('/api/despesas/:id', authenticateToken, [
   param('id').isInt({ min: 1 }),
-  body('imovel_id').isInt({ min: 1 }),
-  body('tipo').isIn(['iptu', 'condominio', 'agua', 'energia', 'manutencao', 'seguro', 'outros']),
+  body('imovel_id').optional({ values: 'falsy' }).isInt({ min: 1 }),
+  body('tipo').trim().notEmpty(),
   body('valor').isFloat({ min: 0 }),
   body('vencimento').isDate(),
-  body('status').isIn(['pago', 'pendente', 'atrasado'])
+  body('status').isIn(['pago', 'pendente', 'atrasado', 'parcial'])
 ], validate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1308,7 +1306,7 @@ app.put('/api/despesas/:id', authenticateToken, [
     const result = await pool.query(
       `UPDATE despesas SET imovel_id=$1, tipo=$2, valor=$3, vencimento=$4, status=$5,
         descricao=$6, observacoes=$7, updated_at=NOW() WHERE id=$8 RETURNING *`,
-      [imovel_id, tipo, valor, vencimento, status, descricao, observacoes, id]
+      [imovel_id || null, tipo, valor, vencimento, status, descricao, observacoes, id]
     );
 
     if (result.rows.length === 0) return res.status(404).json({ error: 'Despesa não encontrada' });
@@ -1318,6 +1316,102 @@ app.put('/api/despesas/:id', authenticateToken, [
   } catch (error) {
     res.status(500).json({ error: 'Erro no servidor' });
   }
+});
+
+// ===== Informar pagamento (dar baixa) — total ou parcial =====
+app.post('/api/despesas/:id/pagar', authenticateToken, [
+  param('id').isInt({ min: 1 }),
+  body('data_pagamento').isDate(),
+  body('valor_pago').isFloat({ gt: 0 }),
+  body('forma_pagamento').optional({ values: 'falsy' }).isString(),
+  body('juros').optional({ values: 'falsy' }).isFloat({ min: 0 }),
+  body('multa').optional({ values: 'falsy' }).isFloat({ min: 0 }),
+  body('desconto').optional({ values: 'falsy' }).isFloat({ min: 0 })
+], validate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data_pagamento, forma_pagamento, observacoes } = req.body;
+    const valorPago = parseFloat(req.body.valor_pago);
+    const juros = parseFloat(req.body.juros || 0);
+    const multa = parseFloat(req.body.multa || 0);
+    const desconto = parseFloat(req.body.desconto || 0);
+
+    const atual = await pool.query('SELECT valor FROM despesas WHERE id=$1', [id]);
+    if (atual.rows.length === 0) return res.status(404).json({ error: 'Conta não encontrada' });
+
+    // Saldo devido considerando encargos: valor + juros + multa - desconto
+    const totalDevido = parseFloat(atual.rows[0].valor) + juros + multa - desconto;
+    // Tolerância de centavo para considerar quitado
+    const status = valorPago >= (totalDevido - 0.005) ? 'pago' : 'parcial';
+
+    const result = await pool.query(
+      `UPDATE despesas SET status=$1, data_pagamento=$2, valor_pago=$3, forma_pagamento=$4,
+        juros=$5, multa=$6, desconto=$7,
+        observacoes=COALESCE($8, observacoes), updated_at=NOW()
+       WHERE id=$9 RETURNING *`,
+      [status, data_pagamento, valorPago, forma_pagamento || null, juros, multa, desconto, observacoes || null, id]
+    );
+
+    await logAtividade(req.user.id, 'informar_pagamento_despesa', 'despesas', parseInt(id), status, req.ip);
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Erro ao informar pagamento:', error.message);
+    res.status(500).json({ error: 'Erro ao informar pagamento' });
+  }
+});
+
+// ===== Reabrir (estornar a baixa) — volta para pendente =====
+app.post('/api/despesas/:id/reabrir', authenticateToken, [
+  param('id').isInt({ min: 1 })
+], validate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `UPDATE despesas SET status='pendente', data_pagamento=NULL, valor_pago=NULL,
+        forma_pagamento=NULL, juros=0, multa=0, desconto=0, updated_at=NOW()
+       WHERE id=$1 RETURNING *`,
+      [id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Conta não encontrada' });
+    await logAtividade(req.user.id, 'reabrir_despesa', 'despesas', parseInt(id), null, req.ip);
+    res.json(result.rows[0]);
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao reabrir' });
+  }
+});
+
+// ===== Categorias de contas a pagar (despesa_tipos) =====
+app.get('/api/despesa-tipos', authenticateToken, async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM despesa_tipos ORDER BY nome ASC');
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: 'Erro ao listar categorias' }); }
+});
+
+app.post('/api/despesa-tipos', authenticateToken, [
+  body('nome').trim().notEmpty().withMessage('Informe o nome da categoria')
+], validate, async (req, res) => {
+  try {
+    const nome = req.body.nome.trim();
+    // Gera um código (slug) a partir do nome
+    const codigo = nome.toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '') // remove acentos
+      .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || `cat_${Date.now()}`;
+    const r = await pool.query(
+      `INSERT INTO despesa_tipos (codigo, nome) VALUES ($1,$2)
+       ON CONFLICT (codigo) DO UPDATE SET nome=EXCLUDED.nome RETURNING *`,
+      [codigo, nome]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: 'Erro ao salvar categoria' }); }
+});
+
+app.delete('/api/despesa-tipos/:id', authenticateToken, [param('id').isInt({ min: 1 })], validate, async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM despesa_tipos WHERE id=$1 RETURNING id', [req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Categoria não encontrada' });
+    res.json({ message: 'Categoria excluída' });
+  } catch (e) { res.status(500).json({ error: 'Erro ao excluir categoria' }); }
 });
 
 app.delete('/api/despesas/:id', authenticateToken, authorizeAdmin, [
@@ -2585,6 +2679,45 @@ async function runMigrations() {
         END IF;
       END $$;
     `);
+    // ===== Contas a Pagar (upgrade da tabela despesas) =====
+    // Categorias cadastráveis
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS despesa_tipos (
+        id SERIAL PRIMARY KEY,
+        codigo VARCHAR(60) UNIQUE NOT NULL,
+        nome VARCHAR(120) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await pool.query(`
+      INSERT INTO despesa_tipos (codigo, nome) VALUES
+      ('iptu','IPTU'),('condominio','Condomínio'),('agua','Água'),('energia','Energia'),
+      ('manutencao','Manutenção'),('seguro','Seguro'),('outros','Outros')
+      ON CONFLICT (codigo) DO NOTHING
+    `);
+    // imovel_id passa a ser opcional
+    await pool.query(`ALTER TABLE despesas ALTER COLUMN imovel_id DROP NOT NULL`);
+    // Novas colunas de baixa / parcelamento
+    await pool.query(`ALTER TABLE despesas ADD COLUMN IF NOT EXISTS data_pagamento DATE`);
+    await pool.query(`ALTER TABLE despesas ADD COLUMN IF NOT EXISTS valor_pago DECIMAL(12,2)`);
+    await pool.query(`ALTER TABLE despesas ADD COLUMN IF NOT EXISTS forma_pagamento VARCHAR(30)`);
+    await pool.query(`ALTER TABLE despesas ADD COLUMN IF NOT EXISTS juros DECIMAL(12,2) DEFAULT 0`);
+    await pool.query(`ALTER TABLE despesas ADD COLUMN IF NOT EXISTS multa DECIMAL(12,2) DEFAULT 0`);
+    await pool.query(`ALTER TABLE despesas ADD COLUMN IF NOT EXISTS desconto DECIMAL(12,2) DEFAULT 0`);
+    await pool.query(`ALTER TABLE despesas ADD COLUMN IF NOT EXISTS parcela_num INTEGER DEFAULT 1`);
+    await pool.query(`ALTER TABLE despesas ADD COLUMN IF NOT EXISTS parcela_total INTEGER DEFAULT 1`);
+    // Remove o CHECK antigo de tipo (agora aceita categorias customizadas)
+    await pool.query(`ALTER TABLE despesas DROP CONSTRAINT IF EXISTS despesas_tipo_check`);
+    // Atualiza o CHECK de status para incluir 'parcial'
+    await pool.query(`
+      DO $$
+      BEGIN
+        ALTER TABLE despesas DROP CONSTRAINT IF EXISTS despesas_status_check;
+        ALTER TABLE despesas ADD CONSTRAINT despesas_status_check
+          CHECK (status IN ('pago', 'pendente', 'atrasado', 'parcial'));
+      END $$;
+    `);
+
     // Tabelas do gerador de recibos (criadas em bancos já existentes)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS recibo_recebedores (

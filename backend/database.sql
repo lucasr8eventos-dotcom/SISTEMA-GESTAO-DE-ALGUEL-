@@ -85,15 +85,34 @@ CREATE TABLE IF NOT EXISTS pagamentos (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Tipos/categorias de conta a pagar (cadastráveis pelo usuário)
+CREATE TABLE IF NOT EXISTS despesa_tipos (
+    id SERIAL PRIMARY KEY,
+    codigo VARCHAR(60) UNIQUE NOT NULL,
+    nome VARCHAR(120) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Contas a pagar (despesas fixas e variáveis)
 CREATE TABLE IF NOT EXISTS despesas (
     id SERIAL PRIMARY KEY,
-    imovel_id INTEGER NOT NULL REFERENCES imoveis(id) ON DELETE RESTRICT,
-    tipo VARCHAR(50) NOT NULL CHECK (tipo IN ('iptu', 'condominio', 'agua', 'energia', 'manutencao', 'seguro', 'outros')),
-    valor DECIMAL(10,2) NOT NULL,
+    imovel_id INTEGER REFERENCES imoveis(id) ON DELETE RESTRICT, -- opcional: conta pode ser "geral"
+    tipo VARCHAR(60) NOT NULL, -- código da categoria (livre, ver despesa_tipos)
+    valor DECIMAL(12,2) NOT NULL,
     vencimento DATE NOT NULL,
-    status VARCHAR(50) NOT NULL DEFAULT 'pendente' CHECK (status IN ('pago', 'pendente', 'atrasado')),
+    status VARCHAR(50) NOT NULL DEFAULT 'pendente' CHECK (status IN ('pago', 'pendente', 'atrasado', 'parcial')),
     descricao VARCHAR(255),
     observacoes TEXT,
+    -- Baixa / informar pagamento
+    data_pagamento DATE,
+    valor_pago DECIMAL(12,2),
+    forma_pagamento VARCHAR(30),
+    juros DECIMAL(12,2) DEFAULT 0,
+    multa DECIMAL(12,2) DEFAULT 0,
+    desconto DECIMAL(12,2) DEFAULT 0,
+    -- Parcelamento / recorrência
+    parcela_num INTEGER DEFAULT 1,
+    parcela_total INTEGER DEFAULT 1,
     recorrencia_id INTEGER, -- agrupa despesas criadas em série
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -305,6 +324,17 @@ ORDER BY dias_atraso DESC;
 INSERT INTO usuarios (nome, email, senha, perfil, status) VALUES
 ('Administrador', 'admin@sistema.com', '$2a$10$Mr3zId.1uxChJYHuP7zXk.rnsHpbZWl7p0WMuSSvwmZIuy6mhrGf2', 'admin', 'ativo')
 ON CONFLICT (email) DO NOTHING;
+
+-- Categorias padrão de contas a pagar
+INSERT INTO despesa_tipos (codigo, nome) VALUES
+('iptu', 'IPTU'),
+('condominio', 'Condomínio'),
+('agua', 'Água'),
+('energia', 'Energia'),
+('manutencao', 'Manutenção'),
+('seguro', 'Seguro'),
+('outros', 'Outros')
+ON CONFLICT (codigo) DO NOTHING;
 
 -- Imóveis de exemplo
 INSERT INTO imoveis (codigo, tipo, endereco, valor_sem_desconto, valor_com_desconto, dia_vencimento, status, numero_iptu) VALUES

@@ -28,7 +28,7 @@ const buildNavItems = (isAdmin) => [
     items: [
       { path: '/pagamentos', icon: Wallet, label: 'Pagamentos' },
       { path: '/inadimplencia', icon: AlertTriangle, label: 'Inadimplência' },
-      { path: '/despesas', icon: Receipt, label: 'Despesas' },
+      { path: '/despesas', icon: Receipt, label: 'Contas a Pagar' },
       { path: '/recibos', icon: ReceiptText, label: 'Recibos' }
     ]
   },

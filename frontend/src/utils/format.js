@@ -63,8 +63,9 @@ export const statusImovel = (status) => {
 export const statusDespesa = (status) => {
   const map = {
     pago: { label: 'Pago', className: 'badge-success' },
-    pendente: { label: 'Pendente', className: 'badge-warning' },
-    atrasado: { label: 'Atrasado', className: 'badge-danger' }
+    pendente: { label: 'Em aberto', className: 'badge-warning' },
+    atrasado: { label: 'Atrasado', className: 'badge-danger' },
+    parcial: { label: 'Parcial', className: 'badge-info' }
   };
   return map[status] || { label: status, className: 'badge-gray' };
 };

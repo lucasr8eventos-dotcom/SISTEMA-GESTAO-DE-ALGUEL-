@@ -82,13 +82,22 @@ export const pagamentosService = {
   recibosLote: (params) => api.get('/pagamentos/recibos-lote', { params, responseType: 'blob' })
 };
 
-// ===== DESPESAS =====
+// ===== DESPESAS / CONTAS A PAGAR =====
 export const despesasService = {
   listar: (params) => api.get('/despesas', { params }),
   criar: (dados) => api.post('/despesas', dados),
   atualizar: (id, dados) => api.put(`/despesas/${id}`, dados),
   excluir: (id, params) => api.delete(`/despesas/${id}`, { params }),
+  pagar: (id, dados) => api.post(`/despesas/${id}/pagar`, dados),
+  reabrir: (id) => api.post(`/despesas/${id}/reabrir`),
   exportar: (formato, params) => api.get(`/despesas/exportar/${formato}`, { params, responseType: 'blob' })
+};
+
+// ===== CATEGORIAS DE CONTAS A PAGAR =====
+export const despesaTiposService = {
+  listar: () => api.get('/despesa-tipos'),
+  criar: (nome) => api.post('/despesa-tipos', { nome }),
+  excluir: (id) => api.delete(`/despesa-tipos/${id}`)
 };
 
 // ===== REAJUSTES =====
