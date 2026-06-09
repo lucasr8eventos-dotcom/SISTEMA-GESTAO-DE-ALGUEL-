@@ -1741,6 +1741,92 @@ app.get('/api/relatorios/inadimplencia', authenticateToken, async (req, res) => 
   }
 });
 
+// Inadimplência consolidada POR INQUILINO — soma todos os meses em aberto
+// (atrasado + pendente vencido) e o que falta dos pagamentos parciais.
+// Diferente do relatório simples, aqui cada inquilino vira UMA ficha com o
+// total devido, nº de meses e dias do atraso mais antigo.
+app.get('/api/relatorios/inadimplencia/consolidada', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        p.id, p.mes, p.ano, p.valor_aluguel, p.valor_recebido, p.status,
+        p.data_vencimento,
+        (CURRENT_DATE - p.data_vencimento) AS dias_atraso,
+        (p.valor_aluguel - COALESCE(p.valor_recebido, 0)) AS falta,
+        i.id AS imovel_id, i.codigo AS imovel_codigo, i.endereco AS imovel_endereco,
+        inq.id AS inquilino_id, inq.nome AS inquilino_nome,
+        inq.telefone AS inquilino_telefone, inq.email AS inquilino_email
+      FROM pagamentos p
+      JOIN imoveis i ON p.imovel_id = i.id
+      LEFT JOIN contratos c ON c.id = p.contrato_id
+      LEFT JOIN inquilinos inq ON c.inquilino_id = inq.id
+      WHERE (p.valor_aluguel - COALESCE(p.valor_recebido, 0)) > 0
+        AND (
+          p.status = 'atrasado'
+          OR p.status = 'parcial'
+          OR (p.status = 'pendente' AND p.data_vencimento < CURRENT_DATE)
+        )
+      ORDER BY p.ano, p.mes
+    `);
+
+    // Agrupa por inquilino (ou por imóvel quando não há inquilino vinculado)
+    const mapa = new Map();
+    for (const row of result.rows) {
+      const chave = row.inquilino_id ? `inq-${row.inquilino_id}` : `imv-${row.imovel_id}`;
+      if (!mapa.has(chave)) {
+        mapa.set(chave, {
+          inquilino_id: row.inquilino_id || null,
+          inquilino_nome: row.inquilino_nome || `Sem inquilino — ${row.imovel_codigo}`,
+          inquilino_telefone: row.inquilino_telefone || null,
+          inquilino_email: row.inquilino_email || null,
+          meses_em_aberto: 0,
+          dias_atraso_max: 0,
+          total_devido: 0,
+          total_atrasado: 0,
+          total_pendente: 0,
+          total_parcial: 0,
+          pagamentos: []
+        });
+      }
+      const g = mapa.get(chave);
+      const falta = parseFloat(row.falta);
+      const dias = Math.max(0, parseInt(row.dias_atraso, 10));
+      g.meses_em_aberto += 1;
+      g.total_devido += falta;
+      if (dias > g.dias_atraso_max) g.dias_atraso_max = dias;
+      if (row.status === 'parcial') g.total_parcial += falta;
+      else if (row.status === 'atrasado') g.total_atrasado += falta;
+      else g.total_pendente += falta; // pendente já vencido
+      g.pagamentos.push({
+        id: row.id, mes: row.mes, ano: row.ano,
+        valor_aluguel: parseFloat(row.valor_aluguel),
+        valor_recebido: row.valor_recebido != null ? parseFloat(row.valor_recebido) : null,
+        falta, status: row.status,
+        data_vencimento: row.data_vencimento,
+        dias_atraso: dias,
+        imovel_codigo: row.imovel_codigo,
+        imovel_endereco: row.imovel_endereco
+      });
+    }
+
+    // Ordena: maior dívida primeiro (mais crítico no topo)
+    const inquilinos = Array.from(mapa.values()).sort((a, b) => b.total_devido - a.total_devido);
+    const resumo = {
+      total_inquilinos: inquilinos.length,
+      total_devido: inquilinos.reduce((s, g) => s + g.total_devido, 0),
+      total_atrasado: inquilinos.reduce((s, g) => s + g.total_atrasado, 0),
+      total_pendente: inquilinos.reduce((s, g) => s + g.total_pendente, 0),
+      total_parcial: inquilinos.reduce((s, g) => s + g.total_parcial, 0),
+      meses_em_aberto: inquilinos.reduce((s, g) => s + g.meses_em_aberto, 0),
+      criticos: inquilinos.filter((g) => g.meses_em_aberto >= 3).length
+    };
+    res.json({ resumo, inquilinos });
+  } catch (error) {
+    console.error('Erro na inadimplência consolidada:', error.message);
+    res.status(500).json({ error: 'Erro ao gerar inadimplência consolidada' });
+  }
+});
+
 // Relatório de imóveis vagos
 app.get('/api/relatorios/imoveis-vagos', authenticateToken, async (req, res) => {
   try {

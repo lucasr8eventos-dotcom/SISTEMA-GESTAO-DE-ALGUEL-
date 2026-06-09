@@ -133,6 +133,7 @@ export const dashboardService = {
 export const relatoriosService = {
   mensal: (params) => api.get('/relatorios/mensal', { params }),
   inadimplencia: () => api.get('/relatorios/inadimplencia'),
+  inadimplenciaConsolidada: () => api.get('/relatorios/inadimplencia/consolidada'),
   imoveisVagos: () => api.get('/relatorios/imoveis-vagos'),
   contratosVencendo: (params) => api.get('/relatorios/contratos-vencendo', { params }),
   despesas: (params) => api.get('/relatorios/despesas', { params }),

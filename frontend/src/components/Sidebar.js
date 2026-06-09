@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutDashboard, Building2, FileText, Wallet, Receipt, ReceiptText, BarChart2, Settings, LogOut, Calendar } from 'lucide-react';
+import { LayoutDashboard, Building2, FileText, Wallet, Receipt, ReceiptText, BarChart2, Settings, LogOut, Calendar, AlertTriangle } from 'lucide-react';
 
 const buildNavItems = (isAdmin) => [
   {
@@ -27,6 +27,7 @@ const buildNavItems = (isAdmin) => [
     section: 'Financeiro',
     items: [
       { path: '/pagamentos', icon: Wallet, label: 'Pagamentos' },
+      { path: '/inadimplencia', icon: AlertTriangle, label: 'Inadimplência' },
       { path: '/despesas', icon: Receipt, label: 'Despesas' },
       { path: '/recibos', icon: ReceiptText, label: 'Recibos' }
     ]
