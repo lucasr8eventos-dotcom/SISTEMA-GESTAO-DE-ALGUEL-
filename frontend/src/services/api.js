@@ -2,10 +2,6 @@ import axios from 'axios';
 
 const API_BASE = process.env.REACT_APP_API_URL || '/api';
 
-// Origem do backend (sem /api no final) — usada para montar URLs autenticadas de arquivos
-// ex: /api/uploads/<arquivo> (rota protegida por JWT no backend).
-export const BACKEND_ORIGIN = API_BASE.replace(/\/api\/?$/, '');
-
 const api = axios.create({
   baseURL: API_BASE,
   timeout: 30000
@@ -70,7 +66,10 @@ export const contratosService = {
   buscarPorId: (id) => api.get(`/contratos/${id}`),
   criar: (dados) => api.post('/contratos', dados, { headers: { 'Content-Type': 'multipart/form-data' } }),
   atualizar: (id, dados) => api.put(`/contratos/${id}`, dados, { headers: { 'Content-Type': 'multipart/form-data' } }),
-  excluir: (id) => api.delete(`/contratos/${id}`)
+  excluir: (id) => api.delete(`/contratos/${id}`),
+  // A rota /uploads é protegida por JWT — precisa ir via axios (com header Authorization),
+  // não dá para abrir direto num <a href>, que não envia o token.
+  baixarArquivo: (filename) => api.get(`/uploads/${filename}`, { responseType: 'blob' })
 };
 
 // ===== PAGAMENTOS =====

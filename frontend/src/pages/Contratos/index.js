@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { contratosService, imoveisService, inquilinosService, reajustesService, BACKEND_ORIGIN } from '../../services/api';
+import { contratosService, imoveisService, inquilinosService, reajustesService } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
@@ -25,7 +25,7 @@ const StatCard = ({ icon, value, label, color, active, onClick }) => (
     onClick={onClick}
     style={{ cursor: 'pointer' }}
   >
-    <div className="stat-icon" style={{ background: color + '18', color }}>{icon}</div>
+    <div className="stat-icon" style={{ background: `color-mix(in srgb, ${color} 15%, transparent)`, color }}>{icon}</div>
     <div className="stat-info">
       <div className="stat-value">{value}</div>
       <div className="stat-label">{label}</div>
@@ -233,6 +233,18 @@ export default function Contratos() {
       fetchTodos();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erro ao excluir contrato');
+    }
+  };
+
+  const verPdf = async (arquivo) => {
+    try {
+      const res = await contratosService.baixarArquivo(arquivo);
+      const url = window.URL.createObjectURL(res.data);
+      window.open(url, '_blank', 'noopener');
+      // Libera o object URL depois que o navegador teve tempo de abri-lo
+      setTimeout(() => window.URL.revokeObjectURL(url), 60000);
+    } catch {
+      toast.error('Erro ao abrir o PDF do contrato');
     }
   };
 
@@ -459,13 +471,12 @@ export default function Contratos() {
                       <td onClick={(e) => e.stopPropagation()}>
                         <div className="table-actions">
                           {c.arquivo_pdf && (
-                            <a
-                              href={`${BACKEND_ORIGIN}/api/uploads/${c.arquivo_pdf}`}
-                              target="_blank"
-                              rel="noreferrer"
+                            <button
+                              type="button"
                               className="btn btn-ghost btn-sm btn-icon"
                               title="Ver PDF"
-                            ><Paperclip size={14} /></a>
+                              onClick={() => verPdf(c.arquivo_pdf)}
+                            ><Paperclip size={14} /></button>
                           )}
                           <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => abrirEditar(c)}><Pencil size={14} /></button>
                           {isAdmin && (
@@ -487,7 +498,7 @@ export default function Contratos() {
       <Modal
         isOpen={modalAberto}
         onClose={() => setModalAberto(false)}
-        title={editando ? `Contrato — ${form.imovel_id ? imoveis.find((i) => i.id === form.imovel_id)?.codigo || '' : ''}` : 'Novo Contrato'}
+        title={editando ? `Contrato — ${form.imovel_id ? imoveis.find((i) => String(i.id) === String(form.imovel_id))?.codigo || '' : ''}` : 'Novo Contrato'}
         size="lg"
         footer={
           abaAtiva === 'dados' ? (

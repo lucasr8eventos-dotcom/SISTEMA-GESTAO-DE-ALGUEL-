@@ -83,7 +83,7 @@ export default function Relatorios() {
       return (
         <>
           <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-            <div style={{ background: 'var(--info-light)', color: '#1a6a8a', padding: '8px 16px', borderRadius: 'var(--radius)', fontSize: 14 }}>
+            <div style={{ background: 'var(--info-light)', color: 'var(--info-dark)', padding: '8px 16px', borderRadius: 'var(--radius)', fontSize: 14 }}>
               Total a Receber: <strong>{formatMoeda(total)}</strong>
             </div>
             <div style={{ background: 'var(--success-light)', color: 'var(--success-dark)', padding: '8px 16px', borderRadius: 'var(--radius)', fontSize: 14 }}>
@@ -99,7 +99,7 @@ export default function Relatorios() {
               <th>Valor</th><th>Recebido</th><th>Pagamento</th><th>Forma</th><th>Status</th>
             </tr></thead>
             <tbody>{dados.map((p, i) => (
-              <tr key={i} style={{ background: p.status === 'pago' ? '#f0fff4' : p.status === 'atrasado' ? '#fff5f5' : p.status === 'pendente' ? '#fffff0' : '' }}>
+              <tr key={i} className={p.status === 'pago' ? 'tr-pago' : p.status === 'atrasado' ? 'tr-atraso' : p.status === 'pendente' ? 'tr-pendente' : ''}>
                 <td><strong>{p.imovel_codigo}</strong></td>
                 <td style={{ maxWidth: 200 }}>{p.imovel_endereco}</td>
                 <td>{p.inquilino_nome || '—'}</td>
@@ -119,7 +119,7 @@ export default function Relatorios() {
       <table>
         <thead><tr><th>Imóvel</th><th>Endereço</th><th>Inquilino</th><th>Telefone</th><th>Mês/Ano</th><th>Valor</th><th>Vencimento</th><th>Dias Atraso</th></tr></thead>
         <tbody>{dados.map((d, i) => (
-          <tr key={i} style={{ background: '#fff5f5' }}>
+          <tr key={i} className="tr-atraso">
             <td><strong>{d.imovel_codigo}</strong></td>
             <td>{d.imovel_endereco}</td>
             <td>{d.inquilino_nome || '—'}</td>
@@ -152,7 +152,7 @@ export default function Relatorios() {
       <table>
         <thead><tr><th>Imóvel</th><th>Endereço</th><th>Inquilino</th><th>Telefone</th><th>Valor</th><th>Vence em</th><th>Dias</th></tr></thead>
         <tbody>{dados.map((c, i) => (
-          <tr key={i} style={{ background: c.dias_para_vencer <= 7 ? '#fff5f5' : '#fffff0' }}>
+          <tr key={i} className={c.dias_para_vencer <= 7 ? 'tr-atraso' : 'tr-pendente'}>
             <td><strong>{c.imovel_codigo}</strong></td>
             <td>{c.imovel_endereco}</td>
             <td>{c.inquilino_nome}</td>

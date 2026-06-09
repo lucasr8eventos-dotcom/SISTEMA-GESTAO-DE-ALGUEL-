@@ -62,6 +62,10 @@ export default function Pagamentos() {
     const params = new URLSearchParams(location.search);
     const s = params.get('status');
     if (s) setFiltroStatus(s);
+    const mes = params.get('mes');
+    if (mes) setFiltroMes(mes);
+    const ano = params.get('ano');
+    if (ano) setFiltroAno(ano);
   }, [location.search]);
 
   const fetchPagamentos = useCallback(async () => {
@@ -233,13 +237,13 @@ export default function Pagamentos() {
   });
 
   // ===== Filtro por inquilino (cliente) =====
+  // Usa o inquilino_id que o backend já devolve via JOIN do contrato — assim
+  // funciona também para pagamentos de contratos vencidos/encerrados (que não
+  // estão na lista de contratos ativos carregada para o formulário).
   const pagamentosFiltrados = useMemo(() => {
     if (!filtroInquilino) return pagamentos;
-    return pagamentos.filter((p) => {
-      const c = contratos.find((ct) => ct.id === p.contrato_id);
-      return c && String(c.inquilino_id) === String(filtroInquilino);
-    });
-  }, [pagamentos, filtroInquilino, contratos]);
+    return pagamentos.filter((p) => String(p.inquilino_id) === String(filtroInquilino));
+  }, [pagamentos, filtroInquilino]);
 
   // ===== Stats =====
   const stats = useMemo(() => {

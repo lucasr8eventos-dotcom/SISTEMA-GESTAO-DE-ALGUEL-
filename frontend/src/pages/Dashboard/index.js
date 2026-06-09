@@ -7,7 +7,7 @@ import { Building2, CheckCircle2, KeyRound, DollarSign, Banknote, AlertCircle, A
 
 const StatCard = ({ icon, value, label, color, onClick }) => (
   <div className="stat-card" onClick={onClick} style={{ cursor: onClick ? 'pointer' : 'default' }}>
-    <div className="stat-icon" style={{ background: color + '18', color }}>
+    <div className="stat-icon" style={{ background: `color-mix(in srgb, ${color} 15%, transparent)`, color }}>
       {icon}
     </div>
     <div className="stat-info">
@@ -204,7 +204,8 @@ export default function Dashboard() {
               {[
                 { label: 'Alugados', value: stats.imoveisAlugados, total: stats.totalImoveis, color: 'var(--success)' },
                 { label: 'Vagos', value: stats.imoveisVagos, total: stats.totalImoveis, color: 'var(--warning)' },
-                { label: 'Em Negociação', value: stats.imoveisNegociacao, total: stats.totalImoveis, color: 'var(--info)' }
+                { label: 'Em Negociação', value: stats.imoveisNegociacao, total: stats.totalImoveis, color: 'var(--info)' },
+                { label: 'Em Manutenção', value: stats.imoveisManutencao, total: stats.totalImoveis, color: 'var(--danger)' }
               ].map((item) => {
                 const pct = stats.totalImoveis > 0 ? Math.round((item.value / stats.totalImoveis) * 100) : 0;
                 return (

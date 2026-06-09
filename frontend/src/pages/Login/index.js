@@ -82,7 +82,7 @@ export default function Login() {
           <div style={{ marginTop: 24, padding: 16, background: 'var(--gray-50)', borderRadius: 'var(--radius)', fontSize: 13, color: 'var(--gray-500)', border: '1px dashed var(--gray-300)' }}>
             <div style={{ fontWeight: 600, marginBottom: 6 }}>Ambiente de desenvolvimento</div>
             <div>Admin: admin@sistema.com / admin123</div>
-            <div>Operador: operador@sistema.com / admin123</div>
+            <div style={{ marginTop: 4 }}>Troque a senha no primeiro acesso.</div>
           </div>
         )}
       </div>
