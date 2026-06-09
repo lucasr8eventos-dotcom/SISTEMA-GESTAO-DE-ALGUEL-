@@ -1820,7 +1820,8 @@ app.get('/api/relatorios/exportar/excel', authenticateToken, async (req, res) =>
         WHERE p.mes=$1 AND p.ano=$2 ORDER BY i.codigo
       `, [mes, ano]);
 
-      const ws = workbook.addWorksheet(`Aluguéis ${mes}/${ano}`);
+      // Nome de aba não pode conter / \ ? * [ ] : (restrição do Excel/exceljs)
+      const ws = workbook.addWorksheet(`Aluguéis ${mes}-${ano}`);
       ws.columns = [
         { header: 'Código', key: 'codigo', width: 10 },
         { header: 'Endereço', key: 'endereco', width: 40 },
