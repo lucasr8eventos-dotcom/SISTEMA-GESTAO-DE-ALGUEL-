@@ -2907,6 +2907,28 @@ app.use((err, req, res, next) => {
 });
 
 // ============================================================
+// SCHEMA INICIAL (cria tabelas/admin no boot — idempotente)
+// ============================================================
+// Roda o database.sql inteiro no boot. O arquivo é todo idempotente
+// (CREATE TABLE IF NOT EXISTS, índices IF NOT EXISTS, inserts ON CONFLICT/
+// guardados por NOT EXISTS), então é seguro rodar a cada start. Isso dispensa
+// rodar o database.sql manualmente ao subir o banco em produção (Railway etc.).
+async function runSchemaInit() {
+  try {
+    const schemaPath = path.join(__dirname, 'database.sql');
+    if (!fs.existsSync(schemaPath)) {
+      console.warn('⚠️  database.sql não encontrado — pulando criação de schema.');
+      return;
+    }
+    const sql = fs.readFileSync(schemaPath, 'utf8');
+    await pool.query(sql);
+    console.log('✅ Schema verificado/criado');
+  } catch (err) {
+    console.error('⚠️  Erro ao inicializar schema:', err.message);
+  }
+}
+
+// ============================================================
 // MIGRATIONS (rodadas no boot, idempotentes)
 // ============================================================
 async function runMigrations() {
@@ -3075,6 +3097,7 @@ async function runMigrations() {
 const server = app.listen(PORT, async () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
   console.log(`📍 Ambiente: ${process.env.NODE_ENV || 'development'}`);
+  await runSchemaInit();
   await runMigrations();
   sincronizarStatusVencidos();
 });
