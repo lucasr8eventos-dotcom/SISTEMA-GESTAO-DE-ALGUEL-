@@ -1341,20 +1341,28 @@ app.post('/api/despesas/:id/pagar', authenticateToken, [
     const multa = parseFloat(req.body.multa || 0);
     const desconto = parseFloat(req.body.desconto || 0);
 
-    const atual = await pool.query('SELECT valor FROM despesas WHERE id=$1', [id]);
+    const atual = await pool.query('SELECT valor, valor_pago, juros, multa, desconto FROM despesas WHERE id=$1', [id]);
     if (atual.rows.length === 0) return res.status(404).json({ error: 'Conta não encontrada' });
 
+    // ACUMULA com pagamentos anteriores (ex.: ao quitar o restante de uma conta
+    // que já estava 'parcial'), em vez de sobrescrever.
+    const a = atual.rows[0];
+    const novoPago = parseFloat(a.valor_pago || 0) + valorPago;
+    const novoJuros = parseFloat(a.juros || 0) + juros;
+    const novoMulta = parseFloat(a.multa || 0) + multa;
+    const novoDesconto = parseFloat(a.desconto || 0) + desconto;
+
     // Saldo devido considerando encargos: valor + juros + multa - desconto
-    const totalDevido = parseFloat(atual.rows[0].valor) + juros + multa - desconto;
+    const totalDevido = parseFloat(a.valor) + novoJuros + novoMulta - novoDesconto;
     // Tolerância de centavo para considerar quitado
-    const status = valorPago >= (totalDevido - 0.005) ? 'pago' : 'parcial';
+    const status = novoPago >= (totalDevido - 0.005) ? 'pago' : 'parcial';
 
     const result = await pool.query(
       `UPDATE despesas SET status=$1, data_pagamento=$2, valor_pago=$3, forma_pagamento=$4,
         juros=$5, multa=$6, desconto=$7,
         observacoes=COALESCE($8, observacoes), updated_at=NOW()
        WHERE id=$9 RETURNING *`,
-      [status, data_pagamento, valorPago, forma_pagamento || null, juros, multa, desconto, observacoes || null, id]
+      [status, data_pagamento, novoPago, forma_pagamento || null, novoJuros, novoMulta, novoDesconto, observacoes || null, id]
     );
 
     await logAtividade(req.user.id, 'informar_pagamento_despesa', 'despesas', parseInt(id), status, req.ip);
