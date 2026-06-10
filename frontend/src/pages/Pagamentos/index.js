@@ -13,7 +13,7 @@ import SearchInput from '../../components/filters/SearchInput';
 import MetricCard from '../../components/MetricCard';
 import { EmptyState, EmptyFiltered, ErrorState } from '../../components/StateViews';
 import { formatMoeda, formatData, getMesAtual, getAnoAtual, MESES, formaPagamentoLabel } from '../../utils/format';
-import { Pencil, Trash2, FileText, Banknote } from 'lucide-react';
+import { Pencil, Trash2, FileText, Banknote, RefreshCw } from 'lucide-react';
 
 const FORM_INICIAL = {
   mes: getMesAtual(), ano: getAnoAtual(), imovel_id: '', contrato_id: '',
@@ -189,6 +189,23 @@ export default function Pagamentos() {
     }
   };
 
+  const handleGerarParcelas = async () => {
+    if (!filtroMes || !filtroAno) {
+      toast.error('Selecione um período (mês e ano) para gerar as parcelas');
+      return;
+    }
+    try {
+      const res = await pagamentosService.gerarParcelas(filtroMes, filtroAno);
+      const { criadas, ja_existiam, contratos_ativos } = res.data;
+      if (contratos_ativos === 0) toast.error('Nenhum contrato ativo vigente neste mês');
+      else if (criadas === 0) toast.success(`Nada a gerar — as ${ja_existiam} parcela(s) deste mês já existem`);
+      else toast.success(`${criadas} parcela(s) gerada(s)${ja_existiam > 0 ? ` · ${ja_existiam} já existia(m)` : ''}`);
+      fetchPagamentos();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erro ao gerar parcelas');
+    }
+  };
+
   const handleRecibosLote = async () => {
     if (!filtroMes || !filtroAno) {
       toast.error('Selecione um período (mês e ano) para gerar os recibos');
@@ -314,6 +331,14 @@ export default function Pagamentos() {
           <p>Controle mensal de aluguéis</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className="btn btn-ghost"
+            onClick={handleGerarParcelas}
+            title="Cria as parcelas pendentes do mês para todos os contratos ativos (não altera as já existentes)"
+            disabled={!filtroMes || !filtroAno}
+          >
+            <RefreshCw size={14} /> Gerar parcelas do mês
+          </button>
           <button
             className="btn btn-ghost"
             onClick={handleRecibosLote}

@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS contratos (
     valor DECIMAL(10,2) NOT NULL,
     garantia VARCHAR(50) NOT NULL CHECK (garantia IN ('caucao', 'fiador', 'seguro', 'sem', 'outro')),
     status VARCHAR(50) NOT NULL DEFAULT 'ativo' CHECK (status IN ('ativo', 'vencido', 'encerrado')),
+    renovacao_automatica BOOLEAN NOT NULL DEFAULT true, -- renova +1 ano ao vencer, a não ser que o contrato seja inativado
     arquivo_pdf VARCHAR(500),
     observacoes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

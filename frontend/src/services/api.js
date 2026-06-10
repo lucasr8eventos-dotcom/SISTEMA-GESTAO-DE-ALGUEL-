@@ -76,6 +76,7 @@ export const contratosService = {
 export const pagamentosService = {
   listar: (params) => api.get('/pagamentos', { params }),
   criar: (dados) => api.post('/pagamentos', dados),
+  gerarParcelas: (mes, ano) => api.post('/pagamentos/gerar-parcelas', { mes, ano }),
   atualizar: (id, dados) => api.put(`/pagamentos/${id}`, dados),
   excluir: (id) => api.delete(`/pagamentos/${id}`),
   recibo: (id) => api.get(`/pagamentos/${id}/recibo`, { responseType: 'blob' }),

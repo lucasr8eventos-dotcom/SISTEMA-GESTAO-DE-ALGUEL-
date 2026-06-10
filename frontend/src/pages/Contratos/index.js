@@ -11,7 +11,7 @@ import { Pencil, Trash2, Paperclip, FileText, CheckCircle2, AlertCircle, Clock, 
 
 const FORM_INICIAL = {
   imovel_id: '', inquilino_id: '', data_inicio: '', data_fim: '',
-  valor: '', garantia: 'fiador', status: 'ativo', observacoes: '', arquivo_pdf: null
+  valor: '', garantia: 'fiador', status: 'ativo', renovacao_automatica: true, observacoes: '', arquivo_pdf: null
 };
 
 const FORM_REAJUSTE_INICIAL = {
@@ -184,6 +184,7 @@ export default function Contratos() {
       valor: c.valor || '',
       garantia: c.garantia || 'fiador',
       status: c.status || 'ativo',
+      renovacao_automatica: c.renovacao_automatica !== false,
       observacoes: c.observacoes || '',
       arquivo_pdf: null
     });
@@ -463,7 +464,12 @@ export default function Contratos() {
                         <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>{c.inquilino_telefone}</div>
                       </td>
                       <td>{formatData(c.data_inicio)}</td>
-                      <td>{formatData(c.data_fim)}</td>
+                      <td>
+                        {formatData(c.data_fim)}
+                        {c.status === 'ativo' && c.renovacao_automatica !== false && (
+                          <span className="chip" style={{ marginLeft: 6, fontSize: 10 }} title="Renova automaticamente +1 ano ao vencer">auto</span>
+                        )}
+                      </td>
                       <td>{formatMoeda(c.valor)}</td>
                       <td>{garantiaLabel(c.garantia)}</td>
                       <td><span className={`badge ${st.className}`}>{st.label}</span></td>
@@ -581,6 +587,21 @@ export default function Contratos() {
                   <option value="vencido">Vencido</option>
                   <option value="encerrado">Encerrado</option>
                 </select>
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="checkbox-inline" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={form.renovacao_automatica}
+                  onChange={(e) => setF('renovacao_automatica', e.target.checked)}
+                />
+                Renovação automática anual
+              </label>
+              <div className="form-hint">
+                Ao vencer, o contrato é prorrogado por +1 ano automaticamente e as parcelas continuam sendo geradas.
+                Desmarque para o contrato vencer normalmente na data de fim.
               </div>
             </div>
 
