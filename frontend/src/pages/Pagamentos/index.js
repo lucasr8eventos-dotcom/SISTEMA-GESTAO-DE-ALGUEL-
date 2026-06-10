@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { pagamentosService, imoveisService, contratosService, inquilinosService, downloadBlob } from '../../services/api';
+import { pagamentosService, imoveisService, contratosService, inquilinosService, recibosService, downloadBlob } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
@@ -13,7 +13,7 @@ import SearchInput from '../../components/filters/SearchInput';
 import MetricCard from '../../components/MetricCard';
 import { EmptyState, EmptyFiltered, ErrorState } from '../../components/StateViews';
 import { formatMoeda, formatData, getMesAtual, getAnoAtual, MESES, formaPagamentoLabel } from '../../utils/format';
-import { Pencil, Trash2, FileText, Banknote } from 'lucide-react';
+import { Pencil, Trash2, FileText, Banknote, RefreshCw } from 'lucide-react';
 
 const FORM_INICIAL = {
   mes: getMesAtual(), ano: getAnoAtual(), imovel_id: '', contrato_id: '',
@@ -54,6 +54,14 @@ export default function Pagamentos() {
   const [editando, setEditando] = useState(null);
   const [salvando, setSalvando] = useState(false);
   const [page, setPage] = useState(1);
+  // Modal de recibo (com recebedor cadastrado)
+  const [reciboAlvo, setReciboAlvo] = useState(null);
+  const [recebedores, setRecebedores] = useState([]);
+  const [reciboRecebedorId, setReciboRecebedorId] = useState('');
+  const [reciboCanhoto, setReciboCanhoto] = useState(true);
+  const [reciboGerando, setReciboGerando] = useState(false);
+  const [novoRecAberto, setNovoRecAberto] = useState(false);
+  const [novoRec, setNovoRec] = useState({ nome: '', documento: '' });
   const toast = useToast();
   const { isAdmin } = useAuth();
   const location = useLocation();
@@ -189,6 +197,75 @@ export default function Pagamentos() {
     }
   };
 
+  // Abre o modal de recibo com recebedor (carrega os recebedores salvos)
+  const abrirRecibo = async (p) => {
+    setReciboAlvo(p);
+    setReciboCanhoto(true);
+    setNovoRecAberto(false);
+    setNovoRec({ nome: '', documento: '' });
+    try {
+      const res = await recibosService.listarRecebedores();
+      setRecebedores(res.data);
+      const padrao = res.data.find((r) => r.padrao) || res.data[0];
+      setReciboRecebedorId(padrao ? String(padrao.id) : '');
+    } catch {
+      setRecebedores([]);
+      setReciboRecebedorId('');
+    }
+  };
+
+  const handleCadastrarRecebedor = async () => {
+    if (!novoRec.nome.trim()) { toast.error('Informe o nome do recebedor'); return; }
+    try {
+      const res = await recibosService.criarRecebedor({ nome: novoRec.nome.trim(), documento: novoRec.documento || undefined });
+      toast.success('Recebedor cadastrado!');
+      const lista = await recibosService.listarRecebedores();
+      setRecebedores(lista.data);
+      setReciboRecebedorId(String(res.data.id));
+      setNovoRecAberto(false);
+      setNovoRec({ nome: '', documento: '' });
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erro ao cadastrar recebedor');
+    }
+  };
+
+  const handleGerarReciboPremium = async () => {
+    if (!reciboRecebedorId) { toast.error('Selecione (ou cadastre) um recebedor'); return; }
+    setReciboGerando(true);
+    try {
+      const res = await pagamentosService.reciboPremium(reciboAlvo.id, {
+        recebedor_id: reciboRecebedorId,
+        com_canhoto: reciboCanhoto
+      });
+      downloadBlob(res.data, `recibo-aluguel-${reciboAlvo.mes}-${reciboAlvo.ano}-${reciboAlvo.imovel_codigo || reciboAlvo.id}.pdf`);
+      setReciboAlvo(null);
+    } catch (err) {
+      // erros chegam como Blob por causa do responseType
+      let msg = 'Erro ao gerar recibo';
+      try { msg = JSON.parse(await err.response.data.text()).error || msg; } catch (_) {}
+      toast.error(msg);
+    } finally {
+      setReciboGerando(false);
+    }
+  };
+
+  const handleGerarParcelas = async () => {
+    if (!filtroMes || !filtroAno) {
+      toast.error('Selecione um período (mês e ano) para gerar as parcelas');
+      return;
+    }
+    try {
+      const res = await pagamentosService.gerarParcelas(filtroMes, filtroAno);
+      const { criadas, ja_existiam, contratos_ativos } = res.data;
+      if (contratos_ativos === 0) toast.error('Nenhum contrato ativo vigente neste mês');
+      else if (criadas === 0) toast.success(`Nada a gerar — as ${ja_existiam} parcela(s) deste mês já existem`);
+      else toast.success(`${criadas} parcela(s) gerada(s)${ja_existiam > 0 ? ` · ${ja_existiam} já existia(m)` : ''}`);
+      fetchPagamentos();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erro ao gerar parcelas');
+    }
+  };
+
   const handleRecibosLote = async () => {
     if (!filtroMes || !filtroAno) {
       toast.error('Selecione um período (mês e ano) para gerar os recibos');
@@ -314,6 +391,14 @@ export default function Pagamentos() {
           <p>Controle mensal de aluguéis</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className="btn btn-ghost"
+            onClick={handleGerarParcelas}
+            title="Cria as parcelas pendentes do mês para todos os contratos ativos (não altera as já existentes)"
+            disabled={!filtroMes || !filtroAno}
+          >
+            <RefreshCw size={14} /> Gerar parcelas do mês
+          </button>
           <button
             className="btn btn-ghost"
             onClick={handleRecibosLote}
@@ -459,7 +544,7 @@ export default function Pagamentos() {
                     <td>
                       <div className="table-actions">
                         {(p.status === 'pago' || p.status === 'parcial') && (
-                          <button className="btn btn-ghost btn-sm btn-icon" title="Gerar Recibo" onClick={() => handleRecibo(p.id)}><FileText size={14} /></button>
+                          <button className="btn btn-ghost btn-sm btn-icon" title="Gerar Recibo" onClick={() => abrirRecibo(p)}><FileText size={14} /></button>
                         )}
                         <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => abrirEditar(p)}><Pencil size={14} /></button>
                         {isAdmin && (
@@ -573,6 +658,72 @@ export default function Pagamentos() {
             <textarea className="form-control" value={form.observacoes} onChange={(e) => setF('observacoes', e.target.value)} rows={2} />
           </div>
         </form>
+      </Modal>
+
+      {/* ===== Modal de recibo (recebedor + pagador) ===== */}
+      <Modal
+        isOpen={!!reciboAlvo}
+        onClose={() => setReciboAlvo(null)}
+        title="Gerar Recibo do Aluguel"
+        footer={
+          <>
+            <button className="btn btn-ghost" onClick={() => reciboAlvo && handleRecibo(reciboAlvo.id)} title="Modelo antigo, sem dados do recebedor">
+              Recibo simples
+            </button>
+            <button className="btn btn-primary" onClick={handleGerarReciboPremium} disabled={reciboGerando}>
+              {reciboGerando ? 'Gerando...' : 'Gerar recibo (PDF)'}
+            </button>
+          </>
+        }
+      >
+        {reciboAlvo && (
+          <>
+            <div style={{ background: 'var(--gray-50)', borderRadius: 'var(--radius)', padding: 14, marginBottom: 16, fontSize: 13 }}>
+              <div><span style={{ color: 'var(--gray-500)' }}>Pagador (inquilino):</span> <strong>{reciboAlvo.inquilino_nome || '—'}</strong></div>
+              <div><span style={{ color: 'var(--gray-500)' }}>Referente:</span> Aluguel {MESES[reciboAlvo.mes - 1]}/{reciboAlvo.ano} · {reciboAlvo.imovel_codigo}</div>
+              <div><span style={{ color: 'var(--gray-500)' }}>Valor:</span> <strong>{formatMoeda(reciboAlvo.valor_recebido || reciboAlvo.valor_aluguel)}</strong></div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Quem está recebendo <span className="required">*</span></label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <select className="form-control" value={reciboRecebedorId} onChange={(e) => setReciboRecebedorId(e.target.value)}>
+                  <option value="">Selecione...</option>
+                  {recebedores.map((r) => (
+                    <option key={r.id} value={r.id}>{r.nome}{r.padrao ? ' (padrão)' : ''}</option>
+                  ))}
+                </select>
+                <button type="button" className="btn btn-ghost" onClick={() => setNovoRecAberto(!novoRecAberto)}>+ Novo</button>
+              </div>
+              {recebedores.length === 0 && (
+                <div className="form-hint" style={{ color: 'var(--warning)' }}>
+                  Nenhum recebedor cadastrado ainda — clique em "+ Novo" para cadastrar.
+                </div>
+              )}
+            </div>
+
+            {novoRecAberto && (
+              <div style={{ border: '1px solid var(--gray-200)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 14, display: 'grid', gap: 8 }}>
+                <input className="form-control" placeholder="Nome / empresa que recebe" value={novoRec.nome} onChange={(e) => setNovoRec((p) => ({ ...p, nome: e.target.value }))} />
+                <input className="form-control" placeholder="CNPJ/CPF (opcional)" value={novoRec.documento} onChange={(e) => setNovoRec((p) => ({ ...p, documento: e.target.value }))} />
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNovoRecAberto(false)}>Cancelar</button>
+                  <button type="button" className="btn btn-primary btn-sm" onClick={handleCadastrarRecebedor}>Salvar recebedor</button>
+                </div>
+                <div className="form-hint">
+                  Para cadastro completo (endereço, logo, contatos), use a tela <strong>Recibos → Recebedores</strong>.
+                </div>
+              </div>
+            )}
+
+            <div className="form-group">
+              <label className="checkbox-inline" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="checkbox" checked={reciboCanhoto} onChange={(e) => setReciboCanhoto(e.target.checked)} />
+                Incluir canhoto destacável
+              </label>
+            </div>
+          </>
+        )}
       </Modal>
 
       <ConfirmDialog

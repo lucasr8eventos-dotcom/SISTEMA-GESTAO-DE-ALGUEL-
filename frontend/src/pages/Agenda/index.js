@@ -32,6 +32,11 @@ const sameDay = (a, b) =>
 
 const parseDate = (s) => {
   if (!s) return null;
+  // Datas do backend chegam como 'YYYY-MM-DD' ou 'YYYY-MM-DDT00:00:00.000Z'.
+  // Extraímos ano/mês/dia direto do texto para NÃO sofrer deslocamento de fuso
+  // (ex.: em UTC-3 um '2026-06-15T00:00:00Z' viraria 14/06 ao converter p/ local).
+  const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
   const d = new Date(s);
   if (isNaN(d.getTime())) return null;
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());

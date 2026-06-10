@@ -213,9 +213,53 @@ const existeContratoSobreposto = async (imovelId, dataInicio, dataFim, excluirId
 
 // Sincroniza status de contratos vencidos e pagamentos atrasados.
 // Executada no startup e periodicamente.
+// Gera as parcelas mensais de aluguel (pendentes) de todos os contratos ativos
+// vigentes no mês/ano informado. Idempotente: o índice único (mes, ano, imovel_id)
+// garante que parcelas já existentes (criadas manualmente ou já pagas) não são tocadas.
+const gerarParcelasMensais = async (mes, ano) => {
+  const ultimoDia = new Date(ano, mes, 0).getDate();
+  const inicioMes = `${ano}-${String(mes).padStart(2, '0')}-01`;
+  const fimMes = `${ano}-${String(mes).padStart(2, '0')}-${String(ultimoDia).padStart(2, '0')}`;
+  const contratos = await pool.query(`
+    SELECT c.id, c.imovel_id, c.valor, i.dia_vencimento
+    FROM contratos c JOIN imoveis i ON i.id = c.imovel_id
+    WHERE c.status = 'ativo' AND c.data_inicio <= $2 AND c.data_fim >= $1
+  `, [inicioMes, fimMes]);
+
+  let criadas = 0;
+  for (const c of contratos.rows) {
+    // Trava o vencimento no último dia do mês (dia 31 em mês de 30 vira 30)
+    const dia = Math.min(c.dia_vencimento || 10, ultimoDia);
+    const venc = `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+    const r = await pool.query(`
+      INSERT INTO pagamentos (mes, ano, imovel_id, contrato_id, valor_aluguel, data_vencimento, status)
+      VALUES ($1,$2,$3,$4,$5,$6,'pendente')
+      ON CONFLICT (mes, ano, imovel_id) DO NOTHING
+      RETURNING id
+    `, [mes, ano, c.imovel_id, c.id, c.valor, venc]);
+    if (r.rowCount > 0) criadas++;
+  }
+  return { criadas, contratos: contratos.rows.length };
+};
+
 const sincronizarStatusVencidos = async () => {
   try {
-    // Marca contratos vencidos e libera imóveis que não têm outro contrato ativo
+    // 1) RENOVAÇÃO AUTOMÁTICA ANUAL: contratos ativos com renovação ligada
+    //    ganham +1 ano ao vencer (loop cobre contratos vencidos há mais de 1 ano).
+    let renovados = 0;
+    for (let i = 0; i < 12; i++) {
+      const r = await pool.query(`
+        UPDATE contratos SET data_fim = data_fim + INTERVAL '1 year', updated_at = NOW()
+        WHERE status = 'ativo' AND renovacao_automatica = true AND data_fim < CURRENT_DATE
+        RETURNING id
+      `);
+      renovados += r.rowCount;
+      if (r.rowCount === 0) break;
+    }
+    if (renovados > 0) console.log(`🔄 ${renovados} contrato(s) renovado(s) automaticamente por +1 ano`);
+
+    // 2) Marca como vencidos apenas os contratos SEM renovação automática
+    //    e libera imóveis que não têm outro contrato ativo
     const c = await pool.query(
       "UPDATE contratos SET status='vencido' WHERE status='ativo' AND data_fim < CURRENT_DATE RETURNING id, imovel_id"
     );
@@ -241,6 +285,12 @@ const sincronizarStatusVencidos = async () => {
     if (c.rowCount || p.rowCount || d.rowCount) {
       console.log(`🔁 Sync de vencidos: ${c.rowCount} contrato(s), ${p.rowCount} pagamento(s), ${d.rowCount} despesa(s)`);
     }
+
+    // 3) GERAÇÃO AUTOMÁTICA: cria as parcelas pendentes do mês corrente
+    //    para todos os contratos ativos (não toca em parcelas já existentes)
+    const agora = new Date();
+    const g = await gerarParcelasMensais(agora.getMonth() + 1, agora.getFullYear());
+    if (g.criadas > 0) console.log(`🧾 ${g.criadas} parcela(s) de aluguel gerada(s) para ${agora.getMonth() + 1}/${agora.getFullYear()}`);
   } catch (err) {
     console.error('Erro ao sincronizar vencidos:', err.message);
   }
@@ -768,6 +818,8 @@ app.post('/api/contratos', authenticateToken, upload.single('arquivo_pdf'), [
   try {
     const { imovel_id, inquilino_id, data_inicio, data_fim, valor, garantia, status, observacoes } = req.body;
     const arquivo_pdf = req.file ? req.file.filename : null;
+    // multipart/form-data envia booleanos como string
+    const renovacaoAuto = !(req.body.renovacao_automatica === 'false' || req.body.renovacao_automatica === false);
 
     if (new Date(data_fim) <= new Date(data_inicio)) {
       return res.status(400).json({ error: 'A data de fim deve ser posterior à data de início' });
@@ -783,13 +835,16 @@ app.post('/api/contratos', authenticateToken, upload.single('arquivo_pdf'), [
     }
 
     const result = await pool.query(
-      `INSERT INTO contratos (imovel_id, inquilino_id, data_inicio, data_fim, valor, garantia, status, arquivo_pdf, observacoes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [imovel_id, inquilino_id, data_inicio, data_fim, valor, garantia, status, arquivo_pdf, observacoes]
+      `INSERT INTO contratos (imovel_id, inquilino_id, data_inicio, data_fim, valor, garantia, status, renovacao_automatica, arquivo_pdf, observacoes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [imovel_id, inquilino_id, data_inicio, data_fim, valor, garantia, status, renovacaoAuto, arquivo_pdf, observacoes]
     );
 
     if (status === 'ativo') {
       await pool.query("UPDATE imoveis SET status='alugado' WHERE id=$1", [imovel_id]);
+      // Já cria a parcela do mês corrente para o contrato novo (idempotente)
+      const agora = new Date();
+      await gerarParcelasMensais(agora.getMonth() + 1, agora.getFullYear()).catch(() => {});
     }
 
     await logAtividade(req.user.id, 'criar_contrato', 'contratos', result.rows[0].id, null, req.ip);
@@ -843,12 +898,32 @@ app.put('/api/contratos/:id', authenticateToken, upload.single('arquivo_pdf'), [
       }
     }
 
+    // multipart/form-data envia booleanos como string; ausente mantém o valor atual
+    const renovacaoAuto = req.body.renovacao_automatica === undefined
+      ? contratoAntes.renovacao_automatica
+      : !(req.body.renovacao_automatica === 'false' || req.body.renovacao_automatica === false);
+
     const result = await pool.query(
       `UPDATE contratos SET imovel_id=$1, inquilino_id=$2, data_inicio=$3, data_fim=$4,
-        valor=$5, garantia=$6, status=$7, arquivo_pdf=$8, observacoes=$9, updated_at=NOW()
-       WHERE id=$10 RETURNING *`,
-      [imovel_id, inquilino_id, data_inicio, data_fim, valor, garantia, status, arquivo_pdf, observacoes, id]
+        valor=$5, garantia=$6, status=$7, renovacao_automatica=$8, arquivo_pdf=$9, observacoes=$10, updated_at=NOW()
+       WHERE id=$11 RETURNING *`,
+      [imovel_id, inquilino_id, data_inicio, data_fim, valor, garantia, status, renovacaoAuto, arquivo_pdf, observacoes, id]
     );
+
+    // Contrato saiu de ativo (encerrado/vencido): remove as parcelas FUTURAS
+    // ainda pendentes — o que já venceu (pago ou devido) fica para histórico/cobrança.
+    if (contratoAntes.status === 'ativo' && (status === 'encerrado' || status === 'vencido')) {
+      const limpas = await pool.query(
+        `DELETE FROM pagamentos
+         WHERE contrato_id=$1 AND status='pendente' AND data_pagamento IS NULL
+           AND data_vencimento > CURRENT_DATE
+         RETURNING id`,
+        [id]
+      );
+      if (limpas.rowCount > 0) {
+        await logAtividade(req.user.id, 'limpar_parcelas_futuras', 'contratos', parseInt(id), `${limpas.rowCount} parcela(s)`, req.ip);
+      }
+    }
 
     // Se o imóvel mudou, libera o imóvel anterior
     const imovelChanged = String(contratoAntes.imovel_id) !== String(imovel_id);
@@ -968,6 +1043,27 @@ app.get('/api/pagamentos', authenticateToken, async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     res.status(500).json({ error: 'Erro no servidor' });
+  }
+});
+
+// Gera manualmente as parcelas de aluguel de um mês/ano (idempotente)
+app.post('/api/pagamentos/gerar-parcelas', authenticateToken, [
+  body('mes').isInt({ min: 1, max: 12 }),
+  body('ano').isInt({ min: 2000, max: 2099 })
+], validate, async (req, res) => {
+  try {
+    const mes = parseInt(req.body.mes, 10);
+    const ano = parseInt(req.body.ano, 10);
+    const r = await gerarParcelasMensais(mes, ano);
+    await logAtividade(req.user.id, 'gerar_parcelas', 'pagamentos', null, `${mes}/${ano}: ${r.criadas} criadas`, req.ip);
+    res.json({
+      criadas: r.criadas,
+      ja_existiam: r.contratos - r.criadas,
+      contratos_ativos: r.contratos
+    });
+  } catch (error) {
+    console.error('Erro ao gerar parcelas:', error.message);
+    res.status(500).json({ error: 'Erro ao gerar parcelas' });
   }
 });
 
@@ -1203,6 +1299,82 @@ app.get('/api/pagamentos/:id/recibo', authenticateToken, [
   }
 });
 
+// Recibo de aluguel no padrão visual do gerador de recibos (navy + canhoto).
+// Pagador = inquilino do contrato; Recebedor = recebedor cadastrado (recibo_recebedores).
+// O PDF é apenas gerado na hora — NADA é gravado no banco.
+app.get('/api/pagamentos/:id/recibo-premium', authenticateToken, [
+  param('id').isInt({ min: 1 }),
+  query('recebedor_id').optional({ values: 'falsy' }).isInt({ min: 1 }),
+  query('com_canhoto').optional().isIn(['true', 'false'])
+], validate, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT p.*, i.codigo as imovel_codigo, i.endereco as imovel_endereco,
+             inq.nome as inquilino_nome, inq.cpf_cnpj as inquilino_documento
+      FROM pagamentos p
+      LEFT JOIN imoveis i ON p.imovel_id = i.id
+      LEFT JOIN contratos c ON c.id = p.contrato_id
+      LEFT JOIN inquilinos inq ON c.inquilino_id = inq.id
+      WHERE p.id = $1
+    `, [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Pagamento não encontrado' });
+    const p = result.rows[0];
+    if (!p.inquilino_nome) {
+      return res.status(422).json({ error: 'Este pagamento não tem inquilino vinculado (contrato). Use o recibo simples.' });
+    }
+
+    // Recebedor: o informado ou o marcado como padrão
+    let rec;
+    if (req.query.recebedor_id) {
+      const q = await pool.query('SELECT * FROM recibo_recebedores WHERE id=$1', [req.query.recebedor_id]);
+      if (q.rows.length === 0) return res.status(422).json({ error: 'Recebedor não encontrado' });
+      rec = q.rows[0];
+    } else {
+      const q = await pool.query('SELECT * FROM recibo_recebedores ORDER BY padrao DESC, id ASC LIMIT 1');
+      if (q.rows.length === 0) {
+        return res.status(422).json({ error: 'Nenhum recebedor cadastrado. Cadastre um na tela Recibos.' });
+      }
+      rec = q.rows[0];
+    }
+
+    const meses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+    const valor = parseFloat(p.valor_recebido || p.valor_aluguel || 0);
+    const dataPag = p.data_pagamento || new Date().toISOString().split('T')[0];
+
+    const r = {
+      // Sem numeração persistida: usa o id do pagamento como referência estável
+      numero: p.id,
+      recebedor_nome: rec.nome,
+      recebedor_documento: rec.documento,
+      recebedor_endereco: rec.endereco,
+      recebedor_telefone: rec.telefone,
+      recebedor_whatsapp: rec.whatsapp,
+      recebedor_email: rec.email,
+      recebedor_site: rec.site,
+      recebedor_logo_url: rec.logo_url,
+      pagador_nome: p.inquilino_nome,
+      pagador_documento: p.inquilino_documento,
+      valor,
+      valor_extenso: valorPorExtenso(valor),
+      forma_pagamento: p.forma_pagamento,
+      data_pagamento: dataPag,
+      referente: `Aluguel de ${meses[p.mes - 1]}/${p.ano} — Imóvel ${p.imovel_codigo} (${p.imovel_endereco})`,
+      local: req.query.local || 'Brasília',
+      com_canhoto: req.query.com_canhoto !== 'false'
+    };
+
+    const doc = new PDFDocument({ size: 'A4', margin: 40 });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=recibo-aluguel-${p.mes}-${p.ano}-${p.imovel_codigo}.pdf`);
+    doc.pipe(res);
+    desenharReciboPDF(doc, r);
+    doc.end();
+  } catch (error) {
+    console.error('Erro no recibo premium:', error.message);
+    res.status(500).json({ error: 'Erro ao gerar recibo' });
+  }
+});
+
 // ============================================================
 // DESPESAS
 // ============================================================
@@ -1341,20 +1513,28 @@ app.post('/api/despesas/:id/pagar', authenticateToken, [
     const multa = parseFloat(req.body.multa || 0);
     const desconto = parseFloat(req.body.desconto || 0);
 
-    const atual = await pool.query('SELECT valor FROM despesas WHERE id=$1', [id]);
+    const atual = await pool.query('SELECT valor, valor_pago, juros, multa, desconto FROM despesas WHERE id=$1', [id]);
     if (atual.rows.length === 0) return res.status(404).json({ error: 'Conta não encontrada' });
 
+    // ACUMULA com pagamentos anteriores (ex.: ao quitar o restante de uma conta
+    // que já estava 'parcial'), em vez de sobrescrever.
+    const a = atual.rows[0];
+    const novoPago = parseFloat(a.valor_pago || 0) + valorPago;
+    const novoJuros = parseFloat(a.juros || 0) + juros;
+    const novoMulta = parseFloat(a.multa || 0) + multa;
+    const novoDesconto = parseFloat(a.desconto || 0) + desconto;
+
     // Saldo devido considerando encargos: valor + juros + multa - desconto
-    const totalDevido = parseFloat(atual.rows[0].valor) + juros + multa - desconto;
+    const totalDevido = parseFloat(a.valor) + novoJuros + novoMulta - novoDesconto;
     // Tolerância de centavo para considerar quitado
-    const status = valorPago >= (totalDevido - 0.005) ? 'pago' : 'parcial';
+    const status = novoPago >= (totalDevido - 0.005) ? 'pago' : 'parcial';
 
     const result = await pool.query(
       `UPDATE despesas SET status=$1, data_pagamento=$2, valor_pago=$3, forma_pagamento=$4,
         juros=$5, multa=$6, desconto=$7,
         observacoes=COALESCE($8, observacoes), updated_at=NOW()
        WHERE id=$9 RETURNING *`,
-      [status, data_pagamento, valorPago, forma_pagamento || null, juros, multa, desconto, observacoes || null, id]
+      [status, data_pagamento, novoPago, forma_pagamento || null, novoJuros, novoMulta, novoDesconto, observacoes || null, id]
     );
 
     await logAtividade(req.user.id, 'informar_pagamento_despesa', 'despesas', parseInt(id), status, req.ip);
@@ -2155,6 +2335,7 @@ const FORMAS_RECIBO = {
   dinheiro: 'Dinheiro',
   debito: 'Cartão de Débito',
   credito: 'Cartão de Crédito',
+  cartao: 'Cartão',
   ted: 'TED',
   transferencia: 'Transferência',
   boleto: 'Boleto',
@@ -2795,6 +2976,9 @@ async function runMigrations() {
           CHECK (status IN ('pago', 'pendente', 'atrasado', 'parcial'));
       END $$;
     `);
+
+    // Renovação automática anual de contratos
+    await pool.query(`ALTER TABLE contratos ADD COLUMN IF NOT EXISTS renovacao_automatica BOOLEAN NOT NULL DEFAULT true`);
 
     // Agenda — eventos manuais persistidos no banco
     await pool.query(`

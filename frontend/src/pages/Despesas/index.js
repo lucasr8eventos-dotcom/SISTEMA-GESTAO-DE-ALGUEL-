@@ -223,11 +223,13 @@ export default function Despesas() {
     });
   };
 
+  const pagJaPago = pagAlvo ? parseFloat(pagAlvo.valor_pago || 0) : 0;
   const pagTotalDevido = pagAlvo
     ? (parseFloat(pagAlvo.valor || 0) + (parseFloat(pagForm.juros) || 0) + (parseFloat(pagForm.multa) || 0) - (parseFloat(pagForm.desconto) || 0))
     : 0;
   const pagValorPago = parseFloat(pagForm.valor_pago) || 0;
-  const pagSaldo = pagTotalDevido - pagValorPago;
+  // Saldo já desconta o que foi pago em baixas anteriores (pagamentos acumulam)
+  const pagSaldo = pagTotalDevido - pagJaPago - pagValorPago;
 
   const handleConfirmarPagamento = async () => {
     if (!pagValorPago || pagValorPago <= 0) { toast.error('Informe o valor pago'); return; }
@@ -536,6 +538,9 @@ export default function Despesas() {
                 <div><span style={{ color: 'var(--gray-500)' }}>Categoria:</span> {labelTipo(pagAlvo.tipo)}</div>
                 <div><span style={{ color: 'var(--gray-500)' }}>Vencimento:</span> {formatData(pagAlvo.vencimento)}</div>
                 <div><span style={{ color: 'var(--gray-500)' }}>Valor da conta:</span> <strong>{formatMoeda(pagAlvo.valor)}</strong></div>
+                {pagJaPago > 0 && (
+                  <div><span style={{ color: 'var(--gray-500)' }}>Já pago antes:</span> <strong style={{ color: 'var(--info)' }}>{formatMoeda(pagJaPago)}</strong></div>
+                )}
               </div>
               <div className="form-hint" style={{ marginTop: 8 }}>
                 Você pode fazer o pagamento total ou parcial. O valor restante fica em aberto.

@@ -24,6 +24,8 @@ const nivel = (meses) => {
 };
 
 const soDigitos = (t) => (t || '').replace(/\D/g, '');
+// Chave estável por inquilino (não usar índice, pois a lista é filtrável)
+const keyOf = (inq) => (inq.inquilino_id != null ? `i${inq.inquilino_id}` : `n${inq.inquilino_nome}`);
 
 export default function Inadimplencia() {
   const [resumo, setResumo] = useState(null);
@@ -41,9 +43,9 @@ export default function Inadimplencia() {
       const res = await relatoriosService.inadimplenciaConsolidada();
       setResumo(res.data.resumo);
       setInquilinos(res.data.inquilinos);
-      // já abre os críticos (3+ meses) por padrão
+      // já abre os críticos (3+ meses) por padrão — chave estável (não índice)
       const criticos = new Set();
-      res.data.inquilinos.forEach((inq, i) => { if (inq.meses_em_aberto >= 3) criticos.add(i); });
+      res.data.inquilinos.forEach((inq) => { if (inq.meses_em_aberto >= 3) criticos.add(keyOf(inq)); });
       setAbertos(criticos);
     } catch (err) {
       setErro(err.response?.data?.error || 'Não foi possível carregar a inadimplência.');
@@ -54,9 +56,9 @@ export default function Inadimplencia() {
 
   useEffect(() => { carregar(); }, [carregar]);
 
-  const toggle = (i) => setAbertos((prev) => {
+  const toggle = (k) => setAbertos((prev) => {
     const n = new Set(prev);
-    n.has(i) ? n.delete(i) : n.add(i);
+    n.has(k) ? n.delete(k) : n.add(k);
     return n;
   });
 
@@ -143,7 +145,8 @@ export default function Inadimplencia() {
       ) : (
         <div style={{ display: 'grid', gap: 12 }}>
           {inquilinosFiltrados.map((inq, i) => {
-            const aberto = abertos.has(i);
+            const k = keyOf(inq);
+            const aberto = abertos.has(k);
             const nv = nivel(inq.meses_em_aberto);
             const critico = inq.meses_em_aberto >= 3;
             const wa = linkWhatsApp(inq);
@@ -159,7 +162,7 @@ export default function Inadimplencia() {
               >
                 {/* Cabeçalho clicável */}
                 <div
-                  onClick={() => toggle(i)}
+                  onClick={() => toggle(k)}
                   style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', cursor: 'pointer' }}
                 >
                   <span style={{ color: 'var(--gray-400)' }}>
