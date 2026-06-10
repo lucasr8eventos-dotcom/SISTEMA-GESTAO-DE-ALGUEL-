@@ -123,7 +123,7 @@ export default function Dashboard() {
           value={formatMoeda(stats.totalReceber)}
           label={`A Receber — ${mesAtual}`}
           color="var(--info)"
-          onClick={() => navigate('/pagamentos')}
+          onClick={() => navigate('/pagamentos?status=pendente')}
         />
         <StatCard
           icon={<Banknote size={22} />}
@@ -144,7 +144,7 @@ export default function Dashboard() {
           value={stats.alugueisAtrasados}
           label="Aluguéis Atrasados"
           color="var(--danger)"
-          onClick={() => navigate('/pagamentos?status=atrasado')}
+          onClick={() => navigate('/inadimplencia')}
         />
         <StatCard
           icon={<Receipt size={22} />}
