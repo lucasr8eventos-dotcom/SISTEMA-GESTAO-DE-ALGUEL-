@@ -187,7 +187,7 @@ export default function Recibos() {
         <div className="page-header-left">
           <h1>Recibos</h1>
           <p>
-            {recibos.length} recibo(s) emitido(s)
+            Emita recibos de pagamento com dados do recebedor e do pagador.
             {proximo != null && <> · próximo Nº <strong>{String(proximo).padStart(4, '0')}</strong></>}
           </p>
         </div>

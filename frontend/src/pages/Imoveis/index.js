@@ -249,7 +249,7 @@ export default function Imoveis() {
       <div className="page-header">
         <div className="page-header-left">
           <h1>Imóveis</h1>
-          <p>{imoveis.length} imóvel(is) encontrado(s)</p>
+          <p>Gerencie os imóveis cadastrados, status de locação e dados principais.</p>
         </div>
         <button className="btn btn-primary" onClick={abrirNovo}>+ Novo Imóvel</button>
       </div>

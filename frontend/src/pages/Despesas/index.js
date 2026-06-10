@@ -289,7 +289,7 @@ export default function Despesas() {
       <div className="page-header">
         <div className="page-header-left">
           <h1>Contas a Pagar</h1>
-          <p>{despesas.length} conta(s) · despesas fixas e variáveis</p>
+          <p>Controle despesas dos imóveis e pagamentos pendentes.</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-ghost" onClick={() => setCatModalOpen(true)} title="Gerenciar categorias">

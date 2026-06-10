@@ -357,7 +357,7 @@ export default function Agenda() {
       <div className="page-header">
         <div className="page-header-left">
           <h1>Agenda</h1>
-          <p>{eventosFiltrados.length} evento(s)</p>
+          <p>Controle compromissos, vencimentos, cobranças e eventos dos imóveis.</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <div className="agenda-view-toggle">

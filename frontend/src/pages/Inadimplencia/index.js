@@ -99,11 +99,8 @@ export default function Inadimplencia() {
         <div className="page-header-left">
           <h1>Inadimplência</h1>
           <p>
-            {resumo ? (
-              resumo.total_inquilinos === 0
-                ? 'Nenhum inquilino em atraso 🎉'
-                : <>{resumo.total_inquilinos} inquilino(s) em aberto · {resumo.meses_em_aberto} mês(es) no total</>
-            ) : 'Carregando...'}
+            Visualize aluguéis em atraso e envie cobranças.
+            {resumo && resumo.total_inquilinos > 0 && <> · {resumo.total_inquilinos} inquilino(s), {resumo.meses_em_aberto} mês(es) em aberto</>}
           </p>
         </div>
       </div>

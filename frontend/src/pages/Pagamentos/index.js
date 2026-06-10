@@ -394,7 +394,7 @@ export default function Pagamentos() {
       <div className="page-header">
         <div className="page-header-left">
           <h1>Pagamentos</h1>
-          <p>Controle mensal de aluguéis</p>
+          <p>Controle parcelas, recebimentos, atrasos e recibos.</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button

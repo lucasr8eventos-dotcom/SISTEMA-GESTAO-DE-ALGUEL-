@@ -354,7 +354,7 @@ export default function Contratos() {
       <div className="page-header">
         <div className="page-header-left">
           <h1>Contratos</h1>
-          <p>{contratosFiltrados.length} contrato(s)</p>
+          <p>Controle contratos ativos, vencidos e próximos do vencimento.</p>
         </div>
         <button className="btn btn-primary" onClick={abrirNovo}>+ Novo Contrato</button>
       </div>

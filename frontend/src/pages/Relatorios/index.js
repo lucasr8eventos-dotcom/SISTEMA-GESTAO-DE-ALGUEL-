@@ -200,7 +200,7 @@ export default function Relatorios() {
       <div className="page-header">
         <div className="page-header-left">
           <h1>Relatórios</h1>
-          <p>Gere e exporte relatórios do sistema</p>
+          <p>Gere relatórios financeiros, cadastrais e operacionais do sistema.</p>
         </div>
       </div>
 
