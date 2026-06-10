@@ -1305,6 +1305,7 @@ app.get('/api/pagamentos/:id/recibo', authenticateToken, [
 app.get('/api/pagamentos/:id/recibo-premium', authenticateToken, [
   param('id').isInt({ min: 1 }),
   query('recebedor_id').optional({ values: 'falsy' }).isInt({ min: 1 }),
+  query('data').optional({ values: 'falsy' }).isDate(),
   query('com_canhoto').optional().isIn(['true', 'false'])
 ], validate, async (req, res) => {
   try {
@@ -1339,7 +1340,10 @@ app.get('/api/pagamentos/:id/recibo-premium', authenticateToken, [
 
     const meses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
     const valor = parseFloat(p.valor_recebido || p.valor_aluguel || 0);
-    const dataPag = p.data_pagamento || new Date().toISOString().split('T')[0];
+    // Data do recibo: a informada (override do usuário) tem prioridade; senão a
+    // data do pagamento; senão hoje. Sempre como string 'YYYY-MM-DD' (sem fuso).
+    const dataPag = req.query.data
+      || (p.data_pagamento ? new Date(p.data_pagamento).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
 
     const r = {
       // Sem numeração persistida: usa o id do pagamento como referência estável

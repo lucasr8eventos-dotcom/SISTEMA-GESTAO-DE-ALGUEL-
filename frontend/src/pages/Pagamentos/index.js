@@ -59,6 +59,7 @@ export default function Pagamentos() {
   const [recebedores, setRecebedores] = useState([]);
   const [reciboRecebedorId, setReciboRecebedorId] = useState('');
   const [reciboCanhoto, setReciboCanhoto] = useState(true);
+  const [reciboData, setReciboData] = useState('');
   const [reciboGerando, setReciboGerando] = useState(false);
   const [novoRecAberto, setNovoRecAberto] = useState(false);
   const [novoRec, setNovoRec] = useState({ nome: '', documento: '' });
@@ -201,6 +202,10 @@ export default function Pagamentos() {
   const abrirRecibo = async (p) => {
     setReciboAlvo(p);
     setReciboCanhoto(true);
+    // Data vem automática (do pagamento ou hoje), mas é editável
+    setReciboData(
+      p.data_pagamento ? p.data_pagamento.split('T')[0] : new Date().toISOString().split('T')[0]
+    );
     setNovoRecAberto(false);
     setNovoRec({ nome: '', documento: '' });
     try {
@@ -235,6 +240,7 @@ export default function Pagamentos() {
     try {
       const res = await pagamentosService.reciboPremium(reciboAlvo.id, {
         recebedor_id: reciboRecebedorId,
+        data: reciboData || undefined,
         com_canhoto: reciboCanhoto
       });
       downloadBlob(res.data, `recibo-aluguel-${reciboAlvo.mes}-${reciboAlvo.ano}-${reciboAlvo.imovel_codigo || reciboAlvo.id}.pdf`);
@@ -715,6 +721,12 @@ export default function Pagamentos() {
                 </div>
               </div>
             )}
+
+            <div className="form-group">
+              <label className="form-label">Data do recibo</label>
+              <input className="form-control" type="date" value={reciboData} onChange={(e) => setReciboData(e.target.value)} />
+              <div className="form-hint">Vem automática (data do pagamento), mas você pode alterar se quiser.</div>
+            </div>
 
             <div className="form-group">
               <label className="checkbox-inline" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
