@@ -80,6 +80,7 @@ export const pagamentosService = {
   atualizar: (id, dados) => api.put(`/pagamentos/${id}`, dados),
   excluir: (id) => api.delete(`/pagamentos/${id}`),
   recibo: (id) => api.get(`/pagamentos/${id}/recibo`, { responseType: 'blob' }),
+  reciboPremium: (id, params) => api.get(`/pagamentos/${id}/recibo-premium`, { params, responseType: 'blob' }),
   recibosLote: (params) => api.get('/pagamentos/recibos-lote', { params, responseType: 'blob' })
 };
 

@@ -1299,6 +1299,82 @@ app.get('/api/pagamentos/:id/recibo', authenticateToken, [
   }
 });
 
+// Recibo de aluguel no padrão visual do gerador de recibos (navy + canhoto).
+// Pagador = inquilino do contrato; Recebedor = recebedor cadastrado (recibo_recebedores).
+// O PDF é apenas gerado na hora — NADA é gravado no banco.
+app.get('/api/pagamentos/:id/recibo-premium', authenticateToken, [
+  param('id').isInt({ min: 1 }),
+  query('recebedor_id').optional({ values: 'falsy' }).isInt({ min: 1 }),
+  query('com_canhoto').optional().isIn(['true', 'false'])
+], validate, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT p.*, i.codigo as imovel_codigo, i.endereco as imovel_endereco,
+             inq.nome as inquilino_nome, inq.cpf_cnpj as inquilino_documento
+      FROM pagamentos p
+      LEFT JOIN imoveis i ON p.imovel_id = i.id
+      LEFT JOIN contratos c ON c.id = p.contrato_id
+      LEFT JOIN inquilinos inq ON c.inquilino_id = inq.id
+      WHERE p.id = $1
+    `, [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Pagamento não encontrado' });
+    const p = result.rows[0];
+    if (!p.inquilino_nome) {
+      return res.status(422).json({ error: 'Este pagamento não tem inquilino vinculado (contrato). Use o recibo simples.' });
+    }
+
+    // Recebedor: o informado ou o marcado como padrão
+    let rec;
+    if (req.query.recebedor_id) {
+      const q = await pool.query('SELECT * FROM recibo_recebedores WHERE id=$1', [req.query.recebedor_id]);
+      if (q.rows.length === 0) return res.status(422).json({ error: 'Recebedor não encontrado' });
+      rec = q.rows[0];
+    } else {
+      const q = await pool.query('SELECT * FROM recibo_recebedores ORDER BY padrao DESC, id ASC LIMIT 1');
+      if (q.rows.length === 0) {
+        return res.status(422).json({ error: 'Nenhum recebedor cadastrado. Cadastre um na tela Recibos.' });
+      }
+      rec = q.rows[0];
+    }
+
+    const meses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+    const valor = parseFloat(p.valor_recebido || p.valor_aluguel || 0);
+    const dataPag = p.data_pagamento || new Date().toISOString().split('T')[0];
+
+    const r = {
+      // Sem numeração persistida: usa o id do pagamento como referência estável
+      numero: p.id,
+      recebedor_nome: rec.nome,
+      recebedor_documento: rec.documento,
+      recebedor_endereco: rec.endereco,
+      recebedor_telefone: rec.telefone,
+      recebedor_whatsapp: rec.whatsapp,
+      recebedor_email: rec.email,
+      recebedor_site: rec.site,
+      recebedor_logo_url: rec.logo_url,
+      pagador_nome: p.inquilino_nome,
+      pagador_documento: p.inquilino_documento,
+      valor,
+      valor_extenso: valorPorExtenso(valor),
+      forma_pagamento: p.forma_pagamento,
+      data_pagamento: dataPag,
+      referente: `Aluguel de ${meses[p.mes - 1]}/${p.ano} — Imóvel ${p.imovel_codigo} (${p.imovel_endereco})`,
+      local: req.query.local || 'Brasília',
+      com_canhoto: req.query.com_canhoto !== 'false'
+    };
+
+    const doc = new PDFDocument({ size: 'A4', margin: 40 });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=recibo-aluguel-${p.mes}-${p.ano}-${p.imovel_codigo}.pdf`);
+    doc.pipe(res);
+    desenharReciboPDF(doc, r);
+    doc.end();
+  } catch (error) {
+    console.error('Erro no recibo premium:', error.message);
+    res.status(500).json({ error: 'Erro ao gerar recibo' });
+  }
+});
+
 // ============================================================
 // DESPESAS
 // ============================================================
@@ -2259,6 +2335,7 @@ const FORMAS_RECIBO = {
   dinheiro: 'Dinheiro',
   debito: 'Cartão de Débito',
   credito: 'Cartão de Crédito',
+  cartao: 'Cartão',
   ted: 'TED',
   transferencia: 'Transferência',
   boleto: 'Boleto',
