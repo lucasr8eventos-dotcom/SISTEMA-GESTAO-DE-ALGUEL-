@@ -93,7 +93,7 @@ export default function Dashboard() {
       <div style={{ marginBottom: 20 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--gray-800)', margin: 0 }}>Dashboard</h1>
         <p style={{ color: 'var(--gray-500)', margin: '4px 0 0', fontSize: 14 }}>
-          Resumo de {mesAtual} de {anoAtual}
+          Visão geral dos imóveis, contratos, pagamentos e pendências.
         </p>
       </div>
       <div className="stats-grid">
@@ -123,7 +123,7 @@ export default function Dashboard() {
           value={formatMoeda(stats.totalReceber)}
           label={`A Receber — ${mesAtual}`}
           color="var(--info)"
-          onClick={() => navigate('/pagamentos')}
+          onClick={() => navigate('/pagamentos?status=pendente')}
         />
         <StatCard
           icon={<Banknote size={22} />}
@@ -144,7 +144,7 @@ export default function Dashboard() {
           value={stats.alugueisAtrasados}
           label="Aluguéis Atrasados"
           color="var(--danger)"
-          onClick={() => navigate('/pagamentos?status=atrasado')}
+          onClick={() => navigate('/inadimplencia')}
         />
         <StatCard
           icon={<Receipt size={22} />}

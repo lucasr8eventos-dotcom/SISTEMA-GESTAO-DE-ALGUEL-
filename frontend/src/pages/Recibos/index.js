@@ -187,7 +187,7 @@ export default function Recibos() {
         <div className="page-header-left">
           <h1>Recibos</h1>
           <p>
-            {recibos.length} recibo(s) emitido(s)
+            Emita recibos de pagamento com dados do recebedor e do pagador.
             {proximo != null && <> · próximo Nº <strong>{String(proximo).padStart(4, '0')}</strong></>}
           </p>
         </div>
@@ -213,7 +213,7 @@ export default function Recibos() {
             <div className="form-grid">
               {/* Recebedor */}
               <div className="form-group">
-                <label className="form-label">Quem está recebendo <span className="required">*</span></label>
+                <label className="form-label">Recebedor / Locador <span className="required">*</span></label>
                 <select
                   className="form-control"
                   value={form.recebedorSel}
@@ -255,7 +255,7 @@ export default function Recibos() {
 
               {/* Pagador */}
               <div className="form-group">
-                <label className="form-label">Quem está pagando <span className="required">*</span></label>
+                <label className="form-label">Pagador / Inquilino <span className="required">*</span></label>
                 <select
                   className="form-control"
                   value={form.pagadorSel}
@@ -317,7 +317,7 @@ export default function Recibos() {
 
             <div className="form-group">
               <label className="form-label">Referente a <span className="required">*</span></label>
-              <input className="form-control" value={form.referente} onChange={(e) => setF('referente', e.target.value)} placeholder="Ex.: aluguel de junho/2026, serviço prestado, etc." />
+              <input className="form-control" value={form.referente} onChange={(e) => setF('referente', e.target.value)} placeholder="Ex.: Pagamento de aluguel do imóvel IM001, competência junho/2026." />
             </div>
 
             <div className="form-group">

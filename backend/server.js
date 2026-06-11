@@ -750,6 +750,222 @@ app.get('/api/imoveis/:id/historico', authenticateToken, [
   }
 });
 
+// Ficha completa do imóvel (PDF): dados cadastrais, contrato/inquilino atual,
+// resumo financeiro, histórico de contratos e últimos pagamentos.
+app.get('/api/imoveis/:id/ficha/pdf', authenticateToken, [
+  param('id').isInt({ min: 1 })
+], validate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const imovelRes = await pool.query('SELECT * FROM imoveis WHERE id=$1', [id]);
+    if (imovelRes.rows.length === 0) return res.status(404).json({ error: 'Imóvel não encontrado' });
+    const im = imovelRes.rows[0];
+
+    const [contratoAtivoRes, contratosRes, pagAggRes, ultimosPagRes, despAggRes] = await Promise.all([
+      pool.query(`
+        SELECT c.*, inq.nome AS inquilino_nome, inq.cpf_cnpj AS inquilino_documento,
+               inq.telefone AS inquilino_telefone, inq.email AS inquilino_email
+        FROM contratos c LEFT JOIN inquilinos inq ON c.inquilino_id = inq.id
+        WHERE c.imovel_id = $1 AND c.status = 'ativo'
+        ORDER BY c.id DESC LIMIT 1`, [id]),
+      pool.query(`
+        SELECT c.data_inicio, c.data_fim, c.valor, c.status, inq.nome AS inquilino_nome
+        FROM contratos c LEFT JOIN inquilinos inq ON c.inquilino_id = inq.id
+        WHERE c.imovel_id = $1 ORDER BY c.data_inicio DESC`, [id]),
+      pool.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE status='pago') AS pagos,
+          COUNT(*) FILTER (WHERE status='atrasado') AS atrasados,
+          COALESCE(SUM(valor_recebido) FILTER (WHERE status IN ('pago','parcial')),0) AS total_recebido,
+          COALESCE(SUM(valor_aluguel) FILTER (WHERE status IN ('pendente','atrasado')),0)
+            + COALESCE(SUM(GREATEST(valor_aluguel - COALESCE(valor_recebido,0),0)) FILTER (WHERE status='parcial'),0) AS total_aberto
+        FROM pagamentos WHERE imovel_id = $1`, [id]),
+      pool.query(`
+        SELECT p.mes, p.ano, p.valor_aluguel, p.valor_recebido, p.status, p.data_vencimento, p.data_pagamento
+        FROM pagamentos p WHERE p.imovel_id = $1
+        ORDER BY p.ano DESC, p.mes DESC LIMIT 12`, [id]),
+      pool.query(`
+        SELECT COUNT(*) AS qtd, COALESCE(SUM(valor),0) AS total,
+               COALESCE(SUM(valor) FILTER (WHERE status IN ('pendente','atrasado','parcial')),0) AS em_aberto
+        FROM despesas WHERE imovel_id = $1`, [id])
+    ]);
+
+    const contrato = contratoAtivoRes.rows[0] || null;
+    const contratos = contratosRes.rows;
+    const pagAgg = pagAggRes.rows[0];
+    const ultimosPag = ultimosPagRes.rows;
+    const despAgg = despAggRes.rows[0];
+
+    const fmtMoeda = (v) => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmtData = (d) => d ? new Date(d).toLocaleDateString('pt-BR') : '—';
+    const tipoLabel = { casa: 'Casa', apartamento: 'Apartamento', comercial: 'Comercial', terreno: 'Terreno', galpao: 'Galpão' };
+    const statusLabel = { alugado: 'Alugado', vago: 'Vago', encerrado: 'Encerrado', negociacao: 'Negociação', manutencao: 'Em Manutenção' };
+    const statusPagLabel = { pago: 'Pago', pendente: 'Pendente', atrasado: 'Atrasado', parcial: 'Parcial' };
+
+    const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=ficha-imovel-${im.codigo}.pdf`);
+    doc.pipe(res);
+
+    desenharCabecalhoRelatorio(doc, {
+      titulo: 'Ficha Completa do Imóvel',
+      periodo: `Imóvel ${im.codigo} — ${im.endereco}`,
+      resumo: [
+        { label: 'Situação', valor: statusLabel[im.status] || im.status },
+        { label: 'Aluguel', valor: fmtMoeda(im.valor_com_desconto || im.valor_sem_desconto) }
+      ]
+    });
+
+    const M = doc.page.margins.left;
+    const W = doc.page.width - M * 2;
+    const maxY = () => doc.page.height - doc.page.margins.bottom;
+    const garantir = (h) => { if (doc.y + h > maxY()) { doc.addPage(); doc.y = doc.page.margins.top; } };
+
+    const tituloSecao = (txt) => {
+      garantir(40);
+      const y0 = doc.y;
+      doc.rect(M, y0, W, 20).fill('#eef2f8');
+      doc.fillColor('#1e3a5f').font('Helvetica-Bold').fontSize(11).text(txt, M + 8, y0 + 5, { width: W - 16, lineBreak: false });
+      doc.fillColor('#000000');
+      doc.y = y0 + 28;
+    };
+
+    const campos = (pares) => {
+      const colW = W / 2;
+      for (let i = 0; i < pares.length; i += 2) {
+        garantir(26);
+        const y0 = doc.y;
+        [pares[i], pares[i + 1]].forEach((p, j) => {
+          if (!p) return;
+          const x = M + j * colW;
+          doc.font('Helvetica').fontSize(8).fillColor('#888888').text(String(p.label).toUpperCase(), x, y0, { width: colW - 10, lineBreak: false });
+          doc.font('Helvetica-Bold').fontSize(10).fillColor('#222222').text(p.valor || '—', x, y0 + 10, { width: colW - 10, lineBreak: false });
+        });
+        doc.y = y0 + 26;
+      }
+    };
+
+    const paragrafo = (txt) => {
+      garantir(24);
+      doc.font('Helvetica').fontSize(9).fillColor('#333333').text(txt, M, doc.y, { width: W });
+      doc.y += 6;
+    };
+
+    const tabela = (colDefs, linhas) => {
+      const startX = M;
+      const larg = colDefs.reduce((s, c) => s + c.w, 0);
+      const drawHead = () => {
+        const hy = doc.y; let x = startX;
+        doc.font('Helvetica-Bold').fontSize(8).fillColor('#1e3a5f');
+        colDefs.forEach((c) => { doc.text(c.label, x, hy, { width: c.w, lineBreak: false }); x += c.w; });
+        const ly = hy + 12;
+        doc.moveTo(startX, ly).lineTo(startX + larg, ly).strokeColor('#1e3a5f').lineWidth(0.5).stroke();
+        doc.strokeColor('#000000').fillColor('#000000');
+        doc.y = ly + 3;
+      };
+      garantir(30);
+      drawHead();
+      linhas.forEach((row) => {
+        if (doc.y + 14 > maxY()) { doc.addPage(); doc.y = doc.page.margins.top; drawHead(); }
+        const ry = doc.y; let x = startX;
+        doc.font('Helvetica').fontSize(8).fillColor('#333333');
+        colDefs.forEach((c, idx) => { doc.text(String(row[idx] ?? '—'), x, ry, { width: c.w, lineBreak: false }); x += c.w; });
+        doc.y = ry + 13;
+      });
+      doc.y += 6;
+    };
+
+    // --- Dados cadastrais ---
+    tituloSecao('Dados do Imóvel');
+    campos([
+      { label: 'Código', valor: im.codigo },
+      { label: 'Tipo', valor: tipoLabel[im.tipo] || im.tipo },
+      { label: 'Endereço', valor: im.endereco },
+      { label: 'Situação', valor: statusLabel[im.status] || im.status },
+      { label: 'Valor (com desconto)', valor: im.valor_com_desconto ? fmtMoeda(im.valor_com_desconto) : '—' },
+      { label: 'Valor (sem desconto)', valor: fmtMoeda(im.valor_sem_desconto) },
+      { label: 'Dia de vencimento', valor: `Dia ${im.dia_vencimento}` },
+      { label: 'Matrícula', valor: im.matricula || '—' },
+      { label: 'Nº IPTU', valor: im.numero_iptu || '—' },
+      { label: 'Conta de água', valor: im.conta_agua || '—' },
+      { label: 'Conta de energia', valor: im.conta_energia || '—' }
+    ]);
+    if (im.observacoes) { tituloSecao('Observações'); paragrafo(im.observacoes); }
+
+    // --- Inquilino atual / contrato vigente ---
+    tituloSecao('Inquilino Atual / Contrato Vigente');
+    if (contrato) {
+      campos([
+        { label: 'Inquilino', valor: contrato.inquilino_nome },
+        { label: 'Documento', valor: contrato.inquilino_documento || '—' },
+        { label: 'Telefone', valor: contrato.inquilino_telefone || '—' },
+        { label: 'E-mail', valor: contrato.inquilino_email || '—' },
+        { label: 'Início do contrato', valor: fmtData(contrato.data_inicio) },
+        { label: 'Fim do contrato', valor: fmtData(contrato.data_fim) },
+        { label: 'Valor do aluguel', valor: fmtMoeda(contrato.valor) },
+        { label: 'Renovação automática', valor: contrato.renovacao_automatica !== false ? 'Sim' : 'Não' }
+      ]);
+    } else {
+      paragrafo('Imóvel sem contrato ativo no momento.');
+    }
+
+    // --- Resumo financeiro ---
+    tituloSecao('Resumo Financeiro');
+    campos([
+      { label: 'Total recebido (histórico)', valor: fmtMoeda(pagAgg.total_recebido) },
+      { label: 'Em aberto', valor: fmtMoeda(pagAgg.total_aberto) },
+      { label: 'Parcelas pagas', valor: String(pagAgg.pagos) },
+      { label: 'Parcelas atrasadas', valor: String(pagAgg.atrasados) },
+      { label: 'Despesas lançadas', valor: `${despAgg.qtd} (${fmtMoeda(despAgg.total)})` },
+      { label: 'Despesas em aberto', valor: fmtMoeda(despAgg.em_aberto) }
+    ]);
+
+    // --- Histórico de contratos ---
+    if (contratos.length > 0) {
+      tituloSecao('Histórico de Contratos');
+      tabela(
+        [
+          { label: 'Inquilino', w: 200 },
+          { label: 'Início', w: 90 },
+          { label: 'Fim', w: 90 },
+          { label: 'Valor', w: 75 },
+          { label: 'Situação', w: 60 }
+        ],
+        contratos.map((c) => [
+          c.inquilino_nome || '—', fmtData(c.data_inicio), fmtData(c.data_fim),
+          fmtMoeda(c.valor), (c.status || '').charAt(0).toUpperCase() + (c.status || '').slice(1)
+        ])
+      );
+    }
+
+    // --- Últimos pagamentos ---
+    if (ultimosPag.length > 0) {
+      tituloSecao('Últimos Pagamentos');
+      tabela(
+        [
+          { label: 'Referência', w: 90 },
+          { label: 'Vencimento', w: 90 },
+          { label: 'Valor', w: 80 },
+          { label: 'Recebido', w: 80 },
+          { label: 'Pagamento', w: 90 },
+          { label: 'Status', w: 75 }
+        ],
+        ultimosPag.map((p) => [
+          `${MESES_REL[p.mes - 1]}/${p.ano}`, fmtData(p.data_vencimento), fmtMoeda(p.valor_aluguel),
+          p.valor_recebido ? fmtMoeda(p.valor_recebido) : '—', fmtData(p.data_pagamento),
+          statusPagLabel[p.status] || p.status
+        ])
+      );
+    }
+
+    desenharRodapesRelatorio(doc);
+    doc.end();
+  } catch (error) {
+    console.error('Erro ao gerar ficha do imóvel:', error);
+    res.status(500).json({ error: 'Erro ao gerar ficha do imóvel' });
+  }
+});
+
 // ============================================================
 // CONTRATOS
 // ============================================================
@@ -1713,20 +1929,100 @@ app.get('/api/despesas/exportar/excel', authenticateToken, async (req, res) => {
   }
 });
 
+// ============================================================
+// PDF de relatórios — cabeçalho e rodapé padronizados
+// ============================================================
+
+// Nome da empresa exibido no topo dos relatórios (configurável por env).
+const EMPRESA_NOME = process.env.EMPRESA_NOME || 'Sistema de Gestão de Aluguéis';
+
+const MESES_REL = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+// Desenha o cabeçalho padrão (faixa azul com nome da empresa + data de emissão,
+// título, período e linha de resumo). Retorna o Y onde o conteúdo deve começar.
+function desenharCabecalhoRelatorio(doc, { titulo, periodo, resumo } = {}) {
+  const M = doc.page.margins.left;
+  const right = doc.page.width - doc.page.margins.right;
+  const largura = right - M;
+  let y = M;
+
+  // Faixa azul com nome da empresa + data de emissão
+  doc.rect(M, y, largura, 34).fill('#1e3a5f');
+  doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(14)
+    .text(EMPRESA_NOME, M + 12, y + 10, { width: largura - 220, lineBreak: false });
+  doc.font('Helvetica').fontSize(9).fillColor('#c7d2e5')
+    .text(`Emitido em ${new Date().toLocaleString('pt-BR')}`, M, y + 12, { width: largura - 12, align: 'right' });
+  y += 34 + 12;
+
+  // Título do relatório
+  doc.fillColor('#1e3a5f').font('Helvetica-Bold').fontSize(14).text(titulo || 'Relatório', M, y);
+  y = doc.y + 1;
+
+  // Período
+  if (periodo) {
+    doc.fillColor('#666666').font('Helvetica').fontSize(10).text(periodo, M, y);
+    y = doc.y + 1;
+  }
+
+  // Linha de resumo (ex.: Total: R$ X · N registros)
+  if (resumo && resumo.length) {
+    const texto = resumo.map((r) => `${r.label}: ${r.valor}`).join('     ·     ');
+    doc.fillColor('#333333').font('Helvetica-Bold').fontSize(10).text(texto, M, y);
+    y = doc.y + 1;
+  }
+
+  y += 8;
+  doc.moveTo(M, y).lineTo(right, y).strokeColor('#1e3a5f').lineWidth(1).stroke();
+  doc.strokeColor('#000000').lineWidth(1).fillColor('#000000');
+  doc.y = y + 10;
+  return doc.y;
+}
+
+// Adiciona rodapé (linha + nome da empresa + "Página X de Y") em todas as
+// páginas. Requer que o PDFDocument seja criado com { bufferPages: true }.
+function desenharRodapesRelatorio(doc) {
+  const range = doc.bufferedPageRange();
+  for (let i = range.start; i < range.start + range.count; i++) {
+    doc.switchToPage(i);
+    const M = doc.page.margins.left;
+    const right = doc.page.width - doc.page.margins.right;
+    const yLinha = doc.page.height - doc.page.margins.bottom + 10;
+    // Escrever na área da margem inferior dispararia auto-paginação do PDFKit;
+    // zera a margem de baixo durante a escrita e restaura em seguida.
+    const margemBaixo = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
+    doc.moveTo(M, yLinha).lineTo(right, yLinha).strokeColor('#d0d7e2').lineWidth(0.5).stroke();
+    doc.strokeColor('#000000');
+    doc.fillColor('#999999').font('Helvetica').fontSize(8)
+      .text(EMPRESA_NOME, M, yLinha + 4, { width: (right - M) / 2, align: 'left', lineBreak: false });
+    doc.text(`Página ${i - range.start + 1} de ${range.count}`, M, yLinha + 4, { width: right - M, align: 'right', lineBreak: false });
+    doc.page.margins.bottom = margemBaixo;
+  }
+}
+
 app.get('/api/despesas/exportar/pdf', authenticateToken, async (req, res) => {
   try {
     const rows = await buscarDespesasParaExport(req);
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="despesas-${new Date().toISOString().split('T')[0]}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="contas-a-pagar-${new Date().toISOString().split('T')[0]}.pdf"`);
 
-    const doc = new PDFDocument({ size: 'A4', margin: 40, layout: 'landscape' });
+    const doc = new PDFDocument({ size: 'A4', margin: 40, layout: 'landscape', bufferPages: true });
     doc.pipe(res);
 
-    doc.fontSize(16).font('Helvetica-Bold').text('Relatório de Despesas', { align: 'center' });
-    doc.moveDown(0.3);
-    doc.fontSize(10).font('Helvetica').text(`Gerado em ${new Date().toLocaleString('pt-BR')}`, { align: 'center' });
-    doc.moveDown();
+    const totalGeral = rows.reduce((s, r) => s + parseFloat(r.valor || 0), 0);
+    const { mes: mesF, ano: anoF, status: statusF } = req.query;
+    let periodo = 'Período: todos os lançamentos';
+    if (mesF && anoF) periodo = `Período: ${MESES_REL[parseInt(mesF) - 1]}/${anoF}`;
+    else if (anoF) periodo = `Período: ano de ${anoF}`;
+    desenharCabecalhoRelatorio(doc, {
+      titulo: 'Relatório de Contas a Pagar',
+      periodo: statusF ? `${periodo} · Status: ${statusF}` : periodo,
+      resumo: [
+        { label: 'Total', valor: `R$ ${totalGeral.toFixed(2)}` },
+        { label: 'Lançamentos', valor: String(rows.length) }
+      ]
+    });
 
     // Cabeçalho da tabela
     const startX = 40;
@@ -1739,19 +2035,24 @@ app.get('/api/despesas/exportar/pdf', authenticateToken, async (req, res) => {
       { label: 'Vencimento', x: 420, w: 80 },
       { label: 'Status', x: 500, w: 70 }
     ];
-    doc.fontSize(10).font('Helvetica-Bold');
-    cols.forEach((c) => doc.text(c.label, startX + c.x, y, { width: c.w }));
-    y += 18;
-    doc.moveTo(startX, y - 4).lineTo(startX + 570, y - 4).stroke();
+    const drawColsHeader = () => {
+      doc.fontSize(10).font('Helvetica-Bold').fillColor('#1e3a5f');
+      cols.forEach((c) => doc.text(c.label, startX + c.x, y, { width: c.w, lineBreak: false }));
+      y += 18;
+      doc.moveTo(startX, y - 4).lineTo(startX + 570, y - 4).strokeColor('#1e3a5f').stroke();
+      doc.strokeColor('#000000').fillColor('#000000').fontSize(9).font('Helvetica');
+    };
+    drawColsHeader();
 
-    doc.fontSize(9).font('Helvetica');
     let total = 0;
     rows.forEach((r) => {
-      if (y > 540) {
+      if (y > 520) {
         doc.addPage();
         y = 40;
+        drawColsHeader();
       }
       const venc = r.vencimento ? new Date(r.vencimento).toLocaleDateString('pt-BR') : '—';
+      doc.fillColor('#333333');
       doc.text(r.imovel_codigo || 'Geral', startX + cols[0].x, y, { width: cols[0].w });
       doc.text(r.tipo_nome || r.tipo, startX + cols[1].x, y, { width: cols[1].w });
       doc.text((r.descricao || '—').substring(0, 50), startX + cols[2].x, y, { width: cols[2].w });
@@ -1763,10 +2064,11 @@ app.get('/api/despesas/exportar/pdf', authenticateToken, async (req, res) => {
     });
 
     y += 10;
-    doc.moveTo(startX, y).lineTo(startX + 570, y).stroke();
+    doc.moveTo(startX, y).lineTo(startX + 570, y).strokeColor('#1e3a5f').stroke();
     y += 6;
-    doc.fontSize(11).font('Helvetica-Bold').text(`TOTAL: R$ ${total.toFixed(2)}`, startX + 340, y);
+    doc.fillColor('#1e3a5f').fontSize(11).font('Helvetica-Bold').text(`TOTAL: R$ ${total.toFixed(2)}`, startX + 340, y);
 
+    desenharRodapesRelatorio(doc);
     doc.end();
   } catch (error) {
     console.error('Erro ao exportar despesas PDF:', error);
@@ -2285,28 +2587,83 @@ app.get('/api/relatorios/exportar/pdf', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Nenhum dado encontrado para os filtros informados' });
     }
 
-    const doc = new PDFDocument({ size: 'A4', margin: 40, layout: 'landscape' });
+    const doc = new PDFDocument({ size: 'A4', margin: 40, layout: 'landscape', bufferPages: true });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=relatorio-${tipo}-${Date.now()}.pdf`);
     doc.pipe(res);
 
-    // Mapeamento explícito de colunas por tipo de relatório
-    const colunasMensal = ['codigo', 'endereco', 'inquilino', 'valor_aluguel', 'data_vencimento', 'status'];
-    const colunasInad = ['imovel_codigo', 'imovel_endereco', 'inquilino_nome', 'mes', 'ano', 'valor_aluguel', 'dias_atraso'];
-    const colunasVagos = ['codigo', 'tipo', 'endereco', 'valor_sem_desconto', 'dia_vencimento', 'status'];
-    const colunas = tipo === 'mensal' ? colunasMensal : tipo === 'inadimplencia' ? colunasInad : colunasVagos;
+    // Colunas (campo + rótulo + largura) por tipo de relatório
+    const defsMensal = [
+      { key: 'codigo', label: 'Imóvel', w: 70 },
+      { key: 'endereco', label: 'Endereço', w: 230 },
+      { key: 'inquilino', label: 'Inquilino', w: 170 },
+      { key: 'valor_aluguel', label: 'Valor', w: 90, money: true },
+      { key: 'data_vencimento', label: 'Vencimento', w: 90, date: true },
+      { key: 'status', label: 'Status', w: 80 }
+    ];
+    const defsInad = [
+      { key: 'imovel_codigo', label: 'Imóvel', w: 70 },
+      { key: 'inquilino_nome', label: 'Inquilino', w: 220 },
+      { key: 'mes', label: 'Mês', w: 50 },
+      { key: 'ano', label: 'Ano', w: 50 },
+      { key: 'valor_aluguel', label: 'Valor', w: 90, money: true },
+      { key: 'dias_atraso', label: 'Dias atraso', w: 80 }
+    ];
+    const defsVagos = [
+      { key: 'codigo', label: 'Código', w: 80 },
+      { key: 'tipo', label: 'Tipo', w: 100 },
+      { key: 'endereco', label: 'Endereço', w: 280 },
+      { key: 'valor_sem_desconto', label: 'Valor', w: 90, money: true },
+      { key: 'dia_vencimento', label: 'Venc.', w: 60 },
+      { key: 'status', label: 'Status', w: 80 }
+    ];
+    const defs = tipo === 'mensal' ? defsMensal : tipo === 'inadimplencia' ? defsInad : defsVagos;
 
-    doc.fontSize(16).fillColor('#1e3a5f').text(titulo, { align: 'center' });
-    doc.fontSize(10).fillColor('#666').text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')}`, { align: 'center' });
-    doc.moveDown();
+    // Período e resumo
+    let periodo = `Total de registros: ${rows.length}`;
+    if (tipo === 'mensal') periodo = `Período: ${meses[parseInt(mes) - 1]}/${ano}`;
+    const resumo = [{ label: 'Registros', valor: String(rows.length) }];
+    if (tipo === 'mensal' || tipo === 'inadimplencia') {
+      const somaValor = rows.reduce((s, r) => s + parseFloat(r.valor_aluguel || 0), 0);
+      resumo.unshift({ label: 'Valor total', valor: `R$ ${somaValor.toFixed(2)}` });
+    }
 
-    rows.forEach((row, i) => {
-      if (i > 0 && i % 25 === 0) doc.addPage();
-      doc.fontSize(9).fillColor('#333');
-      const line = colunas.map(col => String(row[col] ?? '')).join(' | ');
-      doc.text(line, 40, doc.y, { width: 760 });
+    desenharCabecalhoRelatorio(doc, { titulo, periodo, resumo });
+
+    const startX = doc.page.margins.left;
+    const larguraTabela = defs.reduce((s, d) => s + d.w, 0);
+    const fmtCell = (val, def) => {
+      if (val == null || val === '') return '—';
+      if (def.money) return `R$ ${parseFloat(val).toFixed(2)}`;
+      if (def.date) { const d = new Date(val); return isNaN(d.getTime()) ? String(val) : d.toLocaleDateString('pt-BR'); }
+      return String(val);
+    };
+    const drawHeader = () => {
+      const hy = doc.y;
+      let x = startX;
+      doc.fontSize(9).font('Helvetica-Bold').fillColor('#1e3a5f');
+      defs.forEach((d) => { doc.text(d.label, x, hy, { width: d.w, lineBreak: false }); x += d.w; });
+      const ly = hy + 14;
+      doc.moveTo(startX, ly).lineTo(startX + larguraTabela, ly).strokeColor('#1e3a5f').lineWidth(0.5).stroke();
+      doc.strokeColor('#000000').fillColor('#000000');
+      doc.y = ly + 4;
+    };
+    drawHeader();
+
+    rows.forEach((row) => {
+      if (doc.y > doc.page.height - doc.page.margins.bottom - 24) {
+        doc.addPage();
+        doc.y = doc.page.margins.top;
+        drawHeader();
+      }
+      const rowY = doc.y;
+      let x = startX;
+      doc.fontSize(8).font('Helvetica').fillColor('#333333');
+      defs.forEach((d) => { doc.text(fmtCell(row[d.key], d), x, rowY, { width: d.w, lineBreak: false }); x += d.w; });
+      doc.y = rowY + 13;
     });
 
+    desenharRodapesRelatorio(doc);
     doc.end();
   } catch (error) {
     res.status(500).json({ error: 'Erro ao exportar PDF' });

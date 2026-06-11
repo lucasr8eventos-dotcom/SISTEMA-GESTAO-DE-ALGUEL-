@@ -99,11 +99,8 @@ export default function Inadimplencia() {
         <div className="page-header-left">
           <h1>Inadimplência</h1>
           <p>
-            {resumo ? (
-              resumo.total_inquilinos === 0
-                ? 'Nenhum inquilino em atraso 🎉'
-                : <>{resumo.total_inquilinos} inquilino(s) em aberto · {resumo.meses_em_aberto} mês(es) no total</>
-            ) : 'Carregando...'}
+            Visualize aluguéis em atraso e envie cobranças.
+            {resumo && resumo.total_inquilinos > 0 && <> · {resumo.total_inquilinos} inquilino(s), {resumo.meses_em_aberto} mês(es) em aberto</>}
           </p>
         </div>
       </div>
@@ -163,7 +160,10 @@ export default function Inadimplencia() {
                 {/* Cabeçalho clicável */}
                 <div
                   onClick={() => toggle(k)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', cursor: 'pointer' }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', cursor: 'pointer',
+                    background: critico ? 'rgba(239, 68, 68, 0.05)' : undefined
+                  }}
                 >
                   <span style={{ color: 'var(--gray-400)' }}>
                     {aberto ? <ChevronDown size={18} /> : <ChevronRight size={18} />}

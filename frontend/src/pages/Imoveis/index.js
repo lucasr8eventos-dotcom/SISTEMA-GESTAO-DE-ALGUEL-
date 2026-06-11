@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { imoveisService, inquilinosService, contratosService } from '../../services/api';
+import { imoveisService, inquilinosService, contratosService, downloadBlob } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
 import Tabs from '../../components/Tabs';
+import CadastroCompleto from './CadastroCompleto';
 import { MoneyInput, CpfCnpjInput, PhoneInput } from '../../components/MaskedInput';
 import { maskCpfCnpj, maskPhone } from '../../utils/masks';
 import { formatMoeda, formatData, statusImovel, tipoImovel } from '../../utils/format';
 import Pagination, { PER_PAGE } from '../../components/Pagination';
-import { Pencil, Trash2, Search, History, Building2, CheckCircle2, KeyRound, Wrench, User } from 'lucide-react';
+import { Pencil, Trash2, Search, History, Building2, CheckCircle2, KeyRound, Wrench, User, FileText } from 'lucide-react';
 
 const FORM_IMOVEL_INICIAL = {
   codigo: '', tipo: 'apartamento', endereco: '', valor_sem_desconto: '', valor_com_desconto: '',
@@ -50,6 +51,7 @@ export default function Imoveis() {
   const [historicoModal, setHistoricoModal] = useState(null);
   const [historico, setHistorico] = useState([]);
   const [abaAtiva, setAbaAtiva] = useState('dados');
+  const [cadastroCompleto, setCadastroCompleto] = useState(false);
 
   // Aba Inquilino
   const [formInquilino, setFormInquilino] = useState(FORM_INQUILINO_INICIAL);
@@ -228,6 +230,15 @@ export default function Imoveis() {
     }
   };
 
+  const gerarFicha = async (imovel) => {
+    try {
+      const res = await imoveisService.fichaPdf(imovel.id);
+      downloadBlob(res.data, `ficha-imovel-${imovel.codigo}.pdf`);
+    } catch {
+      toast.error('Erro ao gerar a ficha do imóvel');
+    }
+  };
+
   const setF = (campo, valor) => setForm(prev => ({ ...prev, [campo]: valor }));
   const setFI = (campo, valor) => setFormInquilino(prev => ({ ...prev, [campo]: valor }));
 
@@ -249,9 +260,12 @@ export default function Imoveis() {
       <div className="page-header">
         <div className="page-header-left">
           <h1>Imóveis</h1>
-          <p>{imoveis.length} imóvel(is) encontrado(s)</p>
+          <p>Gerencie os imóveis cadastrados, status de locação e dados principais.</p>
         </div>
-        <button className="btn btn-primary" onClick={abrirNovo}>+ Novo Imóvel</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-ghost" onClick={() => setCadastroCompleto(true)}>Cadastro completo</button>
+          <button className="btn btn-primary" onClick={abrirNovo}>+ Novo Imóvel</button>
+        </div>
       </div>
 
       <div className="stats-grid stats-grid-4" style={{ marginBottom: 20 }}>
@@ -326,8 +340,7 @@ export default function Imoveis() {
                   <th>Código</th>
                   <th>Tipo</th>
                   <th>Endereço</th>
-                  <th>Valor (c/ desc.)</th>
-                  <th>Valor (s/ desc.)</th>
+                  <th>Valor</th>
                   <th>Venc.</th>
                   <th>Status</th>
                   <th>Ações</th>
@@ -341,12 +354,17 @@ export default function Imoveis() {
                       <td><strong>{im.codigo}</strong></td>
                       <td>{tipoImovel(im.tipo)}</td>
                       <td style={{ maxWidth: 260 }}>{im.endereco}</td>
-                      <td>{im.valor_com_desconto ? formatMoeda(im.valor_com_desconto) : '—'}</td>
-                      <td>{formatMoeda(im.valor_sem_desconto)}</td>
+                      <td>
+                        <strong>{formatMoeda(im.valor_com_desconto || im.valor_sem_desconto)}</strong>
+                        {im.valor_com_desconto && parseFloat(im.valor_com_desconto) !== parseFloat(im.valor_sem_desconto) && (
+                          <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>s/ desc.: {formatMoeda(im.valor_sem_desconto)}</div>
+                        )}
+                      </td>
                       <td>Dia {im.dia_vencimento}</td>
                       <td><span className={`badge ${st.className}`}>{st.label}</span></td>
                       <td onClick={(e) => e.stopPropagation()}>
                         <div className="table-actions">
+                          <button className="btn btn-ghost btn-sm btn-icon" title="Ficha completa (PDF)" onClick={() => gerarFicha(im)}><FileText size={14} /></button>
                           <button className="btn btn-ghost btn-sm btn-icon" title="Histórico" onClick={() => verHistorico(im)}><History size={14} /></button>
                           <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => abrirEditar(im)}><Pencil size={14} /></button>
                           {isAdmin && (
@@ -563,6 +581,13 @@ export default function Imoveis() {
         onConfirm={handleExcluir}
         title="Excluir Imóvel"
         message={`Tem certeza que deseja excluir o imóvel "${confirmExcluir?.codigo}"? Esta ação não pode ser desfeita.`}
+      />
+
+      <CadastroCompleto
+        isOpen={cadastroCompleto}
+        onClose={() => setCadastroCompleto(false)}
+        onDone={fetchImoveis}
+        toast={toast}
       />
     </div>
   );

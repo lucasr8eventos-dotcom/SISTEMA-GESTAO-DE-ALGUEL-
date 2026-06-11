@@ -394,7 +394,7 @@ export default function Pagamentos() {
       <div className="page-header">
         <div className="page-header-left">
           <h1>Pagamentos</h1>
-          <p>Controle mensal de aluguéis</p>
+          <p>Controle parcelas, recebimentos, atrasos e recibos.</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
@@ -520,33 +520,44 @@ export default function Pagamentos() {
             <table>
               <thead>
                 <tr>
-                  <th>Mês/Ano</th>
-                  <th>Imóvel</th>
-                  <th>Inquilino</th>
-                  <th>Valor</th>
                   <th>Vencimento</th>
-                  <th>Pagamento</th>
-                  <th>Recebido</th>
-                  <th>Forma</th>
+                  <th>Inquilino</th>
+                  <th>Imóvel</th>
+                  <th>Valor</th>
                   <th>Status</th>
+                  <th>Pagamento</th>
                   <th>Ações</th>
                 </tr>
               </thead>
               <tbody>
                 {paginatedPagamentos.map((p) => (
                   <tr key={p.id} className={rowClass(p.status)}>
-                    <td>{p.mes}/{p.ano}</td>
                     <td>
-                      <strong>{p.imovel_codigo}</strong>
-                      <div style={{ fontSize: 12, color: 'var(--gray-500)', maxWidth: 160 }}>{p.imovel_endereco}</div>
+                      <strong>{formatData(p.data_vencimento)}</strong>
+                      <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>{MESES[p.mes - 1]}/{p.ano}</div>
                     </td>
                     <td>{p.inquilino_nome || '—'}</td>
-                    <td>{formatMoeda(p.valor_aluguel)}</td>
-                    <td>{formatData(p.data_vencimento)}</td>
-                    <td>{formatData(p.data_pagamento)}</td>
-                    <td>{p.valor_recebido ? formatMoeda(p.valor_recebido) : '—'}</td>
-                    <td>{p.forma_pagamento ? formaPagamentoLabel(p.forma_pagamento) : '—'}</td>
+                    <td>
+                      <strong>{p.imovel_codigo}</strong>
+                      <div style={{ fontSize: 12, color: 'var(--gray-500)', maxWidth: 200 }}>{p.imovel_endereco}</div>
+                    </td>
+                    <td>
+                      <strong>{formatMoeda(p.valor_aluguel)}</strong>
+                      {p.valor_recebido && parseFloat(p.valor_recebido) !== parseFloat(p.valor_aluguel) && (
+                        <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>Recebido: {formatMoeda(p.valor_recebido)}</div>
+                      )}
+                    </td>
                     <td><StatusBadge status={p.status} /></td>
+                    <td>
+                      {p.data_pagamento ? (
+                        <>
+                          <div>{formatData(p.data_pagamento)}</div>
+                          {p.forma_pagamento && (
+                            <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>{formaPagamentoLabel(p.forma_pagamento)}</div>
+                          )}
+                        </>
+                      ) : '—'}
+                    </td>
                     <td>
                       <div className="table-actions">
                         {(p.status === 'pago' || p.status === 'parcial') && (

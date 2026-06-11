@@ -64,9 +64,9 @@ const gerarEventosPagamentos = (pagamentos) => {
     if (!data) return null;
     const pago = p.status === 'pago' || p.data_pagamento;
     let cor, status;
-    if (pago) { cor = 'cinza'; status = 'concluido'; }
+    if (pago) { cor = 'verde'; status = 'concluido'; }
     else if (data < hoje) { cor = 'vermelho'; status = 'atrasado'; }
-    else { cor = 'azul'; status = 'pendente'; }
+    else { cor = 'laranja'; status = 'pendente'; }
     return {
       id: `pag-${p.id}`, tipo: 'aluguel',
       titulo: `Aluguel — ${p.imovel_codigo || 'Imóvel'} / ${p.inquilino_nome || 'Inquilino'}`,
@@ -87,8 +87,7 @@ const gerarEventosContratos = (contratos) => {
     const dias = diasEntre(data, hoje);
     let cor, status;
     if (c.status === 'encerrado' && renovados.has(c.imovel_id)) { cor = 'cinza'; status = 'concluido'; }
-    else if (dias < 0) { cor = 'vermelho'; status = 'atrasado'; }
-    else { cor = 'amarelo'; status = 'pendente'; }
+    else { cor = 'roxo'; status = dias < 0 ? 'atrasado' : 'pendente'; }
     return {
       id: `cont-${c.id}`, tipo: 'contrato',
       titulo: `Contrato — ${c.imovel_codigo || 'Imóvel'} / ${c.inquilino_nome || 'Inquilino'}`,
@@ -106,7 +105,7 @@ const gerarEventosReajustes = (reajustes) => {
     let cor, status;
     if (r.status === 'aplicado') { cor = 'cinza'; status = 'concluido'; }
     else if (data < hoje) { cor = 'vermelho'; status = 'atrasado'; }
-    else { cor = 'amarelo'; status = 'pendente'; }
+    else { cor = 'laranja'; status = 'pendente'; }
     return {
       id: `reaj-${r.id}`, tipo: 'reajuste',
       titulo: `Reajuste — ${r.imovel_codigo || 'Imóvel'} / ${r.inquilino_nome || 'Inquilino'}`,
@@ -178,7 +177,7 @@ export default function Agenda() {
       setManuais(r.data.map((m) => ({
         id: `man-${m.id}`, rawId: m.id, tipo: 'manual', subtipo: m.tipo,
         titulo: m.titulo, data: parseDate(m.data), hora: m.hora ? String(m.hora).slice(0, 5) : '',
-        cor: 'verde', status: 'pendente',
+        cor: 'azul', status: 'pendente',
         meta: { imovel_id: m.imovel_id, manual: true },
         _raw: m
       })));
@@ -357,7 +356,7 @@ export default function Agenda() {
       <div className="page-header">
         <div className="page-header-left">
           <h1>Agenda</h1>
-          <p>{eventosFiltrados.length} evento(s)</p>
+          <p>Controle compromissos, vencimentos, cobranças e eventos dos imóveis.</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <div className="agenda-view-toggle">
@@ -397,6 +396,28 @@ export default function Agenda() {
           <option value="">Todos os imóveis</option>
           {imoveis.map((im) => <option key={im.id} value={im.id}>{im.codigo} — {im.endereco}</option>)}
         </select>
+        {(filtroTipo || filtroStatus || filtroImovel) && (
+          <button className="btn btn-ghost btn-sm" onClick={() => { setFiltroTipo(''); setFiltroStatus(''); setFiltroImovel(''); }}>
+            Limpar filtros
+          </button>
+        )}
+      </div>
+
+      {/* Legenda de cores */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', margin: '0 0 14px', fontSize: 12, color: 'var(--gray-600)' }}>
+        {[
+          { c: '#3b82f6', t: 'Evento manual' },
+          { c: '#f97316', t: 'Vencimento próximo' },
+          { c: '#ef4444', t: 'Pagamento atrasado' },
+          { c: '#8b5cf6', t: 'Contrato vencendo' },
+          { c: '#22c55e', t: 'Pagamento recebido' },
+          { c: 'var(--gray-400)', t: 'Concluído' }
+        ].map((l) => (
+          <span key={l.t} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ width: 11, height: 11, borderRadius: 3, background: l.c, display: 'inline-block' }} />
+            {l.t}
+          </span>
+        ))}
       </div>
 
       {/* Barra de navegação */}
@@ -464,8 +485,8 @@ export default function Agenda() {
             </div>
             {eventosDoDia(ref).length === 0 ? (
               <div className="empty-state" style={{ padding: 32 }}>
-                <p style={{ color: 'var(--gray-500)' }}>Nenhum evento neste dia.</p>
-                <button className="btn btn-ghost btn-sm" onClick={abrirNovoManual}><Plus size={14} /> Adicionar evento</button>
+                <p style={{ color: 'var(--gray-500)' }}>Nenhum evento encontrado para este período. Clique em "Novo Evento" para cadastrar um compromisso.</p>
+                <button className="btn btn-ghost btn-sm" onClick={abrirNovoManual}><Plus size={14} /> Novo Evento</button>
               </div>
             ) : (
               <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>

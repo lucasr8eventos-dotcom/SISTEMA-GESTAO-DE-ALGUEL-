@@ -545,6 +545,7 @@ tbody tr:last-child td { border-bottom: none; }
   display: flex;
   gap: 4px;
   align-items: center;
+  flex-wrap: nowrap;
 }
 
 /* ===== BADGES / STATUS ===== */
@@ -1041,6 +1042,9 @@ textarea.form-control { min-height: 80px; resize: vertical; }
   .stats-grid { grid-template-columns: 1fr; }
   .alerts-grid { grid-template-columns: 1fr; }
 
+  /* Aproveita melhor a tela: 2 cards de resumo por linha no celular */
+  .metrics-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+
   .topbar-left .topbar-title { font-size: 15px; }
   .user-info { display: none; }
 }
@@ -1202,6 +1206,7 @@ textarea.form-control { min-height: 80px; resize: vertical; }
 .agenda-evt-laranja { background: rgba(249, 115, 22, 0.18); color: #9a3412; }
 .agenda-evt-cinza { background: var(--gray-100); color: var(--gray-500); }
 .agenda-evt-verde { background: rgba(34, 197, 94, 0.18); color: #166534; }
+.agenda-evt-roxo { background: rgba(139, 92, 246, 0.18); color: #5b21b6; }
 .agenda-evt.concluido { text-decoration: line-through; opacity: 0.7; }
 
 .agenda-evt-mais {
@@ -1232,6 +1237,7 @@ textarea.form-control { min-height: 80px; resize: vertical; }
 .agenda-lista-item.agenda-evt-vermelho { border-left-color: #ef4444; background: rgba(239, 68, 68, 0.04); }
 .agenda-lista-item.agenda-evt-amarelo { border-left-color: #f59e0b; }
 .agenda-lista-item.agenda-evt-laranja { border-left-color: #f97316; }
+.agenda-lista-item.agenda-evt-roxo { border-left-color: #8b5cf6; }
 .agenda-lista-item.agenda-evt-cinza { border-left-color: var(--gray-300); }
 .agenda-lista-item.agenda-evt-verde { border-left-color: #22c55e; }
 

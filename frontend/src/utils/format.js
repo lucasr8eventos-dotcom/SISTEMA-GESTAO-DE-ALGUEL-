@@ -52,10 +52,10 @@ export const statusContrato = (status) => {
 export const statusImovel = (status) => {
   const map = {
     alugado: { label: 'Alugado', className: 'badge-success' },
-    vago: { label: 'Vago', className: 'badge-warning' },
+    vago: { label: 'Vago', className: 'badge-gray' },
     encerrado: { label: 'Encerrado', className: 'badge-gray' },
     negociacao: { label: 'Negociação', className: 'badge-info' },
-    manutencao: { label: 'Em Manutenção', className: 'badge-danger' }
+    manutencao: { label: 'Em Manutenção', className: 'badge-warning' }
   };
   return map[status] || { label: status, className: 'badge-gray' };
 };
@@ -63,8 +63,8 @@ export const statusImovel = (status) => {
 export const statusDespesa = (status) => {
   const map = {
     pago: { label: 'Pago', className: 'badge-success' },
-    pendente: { label: 'Em aberto', className: 'badge-warning' },
-    atrasado: { label: 'Atrasado', className: 'badge-danger' },
+    pendente: { label: 'Pendente', className: 'badge-warning' },
+    atrasado: { label: 'Vencido', className: 'badge-danger' },
     parcial: { label: 'Parcial', className: 'badge-info' }
   };
   return map[status] || { label: status, className: 'badge-gray' };
