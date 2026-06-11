@@ -260,7 +260,11 @@ export default function Despesas() {
     despesas.forEach((d) => {
       counts[d.status] = (counts[d.status] || 0) + 1;
       total += parseFloat(d.valor || 0);
-      pago += parseFloat(d.valor_pago || 0);
+      // Conta marcada "pago" sem valor_pago (ex.: criada direto como paga) deve
+      // contar o valor cheio no card Pago — senão apareceria R$ 0,00.
+      pago += d.status === 'pago'
+        ? parseFloat(d.valor_pago || d.valor || 0)
+        : parseFloat(d.valor_pago || 0);
       const falta = faltaDe(d);
       if (d.status !== 'pago') aberto += falta;
       if (d.status === 'atrasado') atrasado += falta;
