@@ -48,7 +48,8 @@ export const imoveisService = {
   criar: (dados) => api.post('/imoveis', dados),
   atualizar: (id, dados) => api.put(`/imoveis/${id}`, dados),
   excluir: (id) => api.delete(`/imoveis/${id}`),
-  historico: (id) => api.get(`/imoveis/${id}/historico`)
+  historico: (id) => api.get(`/imoveis/${id}/historico`),
+  fichaPdf: (id) => api.get(`/imoveis/${id}/ficha/pdf`, { responseType: 'blob' })
 };
 
 // ===== INQUILINOS =====

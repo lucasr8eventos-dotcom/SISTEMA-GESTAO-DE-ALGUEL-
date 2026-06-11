@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { imoveisService, inquilinosService, contratosService } from '../../services/api';
+import { imoveisService, inquilinosService, contratosService, downloadBlob } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
@@ -10,7 +10,7 @@ import { MoneyInput, CpfCnpjInput, PhoneInput } from '../../components/MaskedInp
 import { maskCpfCnpj, maskPhone } from '../../utils/masks';
 import { formatMoeda, formatData, statusImovel, tipoImovel } from '../../utils/format';
 import Pagination, { PER_PAGE } from '../../components/Pagination';
-import { Pencil, Trash2, Search, History, Building2, CheckCircle2, KeyRound, Wrench, User } from 'lucide-react';
+import { Pencil, Trash2, Search, History, Building2, CheckCircle2, KeyRound, Wrench, User, FileText } from 'lucide-react';
 
 const FORM_IMOVEL_INICIAL = {
   codigo: '', tipo: 'apartamento', endereco: '', valor_sem_desconto: '', valor_com_desconto: '',
@@ -230,6 +230,15 @@ export default function Imoveis() {
     }
   };
 
+  const gerarFicha = async (imovel) => {
+    try {
+      const res = await imoveisService.fichaPdf(imovel.id);
+      downloadBlob(res.data, `ficha-imovel-${imovel.codigo}.pdf`);
+    } catch {
+      toast.error('Erro ao gerar a ficha do imóvel');
+    }
+  };
+
   const setF = (campo, valor) => setForm(prev => ({ ...prev, [campo]: valor }));
   const setFI = (campo, valor) => setFormInquilino(prev => ({ ...prev, [campo]: valor }));
 
@@ -355,6 +364,7 @@ export default function Imoveis() {
                       <td><span className={`badge ${st.className}`}>{st.label}</span></td>
                       <td onClick={(e) => e.stopPropagation()}>
                         <div className="table-actions">
+                          <button className="btn btn-ghost btn-sm btn-icon" title="Ficha completa (PDF)" onClick={() => gerarFicha(im)}><FileText size={14} /></button>
                           <button className="btn btn-ghost btn-sm btn-icon" title="Histórico" onClick={() => verHistorico(im)}><History size={14} /></button>
                           <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => abrirEditar(im)}><Pencil size={14} /></button>
                           {isAdmin && (

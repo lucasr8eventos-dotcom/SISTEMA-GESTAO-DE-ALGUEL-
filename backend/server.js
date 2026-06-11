@@ -750,6 +750,222 @@ app.get('/api/imoveis/:id/historico', authenticateToken, [
   }
 });
 
+// Ficha completa do imóvel (PDF): dados cadastrais, contrato/inquilino atual,
+// resumo financeiro, histórico de contratos e últimos pagamentos.
+app.get('/api/imoveis/:id/ficha/pdf', authenticateToken, [
+  param('id').isInt({ min: 1 })
+], validate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const imovelRes = await pool.query('SELECT * FROM imoveis WHERE id=$1', [id]);
+    if (imovelRes.rows.length === 0) return res.status(404).json({ error: 'Imóvel não encontrado' });
+    const im = imovelRes.rows[0];
+
+    const [contratoAtivoRes, contratosRes, pagAggRes, ultimosPagRes, despAggRes] = await Promise.all([
+      pool.query(`
+        SELECT c.*, inq.nome AS inquilino_nome, inq.cpf_cnpj AS inquilino_documento,
+               inq.telefone AS inquilino_telefone, inq.email AS inquilino_email
+        FROM contratos c LEFT JOIN inquilinos inq ON c.inquilino_id = inq.id
+        WHERE c.imovel_id = $1 AND c.status = 'ativo'
+        ORDER BY c.id DESC LIMIT 1`, [id]),
+      pool.query(`
+        SELECT c.data_inicio, c.data_fim, c.valor, c.status, inq.nome AS inquilino_nome
+        FROM contratos c LEFT JOIN inquilinos inq ON c.inquilino_id = inq.id
+        WHERE c.imovel_id = $1 ORDER BY c.data_inicio DESC`, [id]),
+      pool.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE status='pago') AS pagos,
+          COUNT(*) FILTER (WHERE status='atrasado') AS atrasados,
+          COALESCE(SUM(valor_recebido) FILTER (WHERE status IN ('pago','parcial')),0) AS total_recebido,
+          COALESCE(SUM(valor_aluguel) FILTER (WHERE status IN ('pendente','atrasado')),0)
+            + COALESCE(SUM(GREATEST(valor_aluguel - COALESCE(valor_recebido,0),0)) FILTER (WHERE status='parcial'),0) AS total_aberto
+        FROM pagamentos WHERE imovel_id = $1`, [id]),
+      pool.query(`
+        SELECT p.mes, p.ano, p.valor_aluguel, p.valor_recebido, p.status, p.data_vencimento, p.data_pagamento
+        FROM pagamentos p WHERE p.imovel_id = $1
+        ORDER BY p.ano DESC, p.mes DESC LIMIT 12`, [id]),
+      pool.query(`
+        SELECT COUNT(*) AS qtd, COALESCE(SUM(valor),0) AS total,
+               COALESCE(SUM(valor) FILTER (WHERE status IN ('pendente','atrasado','parcial')),0) AS em_aberto
+        FROM despesas WHERE imovel_id = $1`, [id])
+    ]);
+
+    const contrato = contratoAtivoRes.rows[0] || null;
+    const contratos = contratosRes.rows;
+    const pagAgg = pagAggRes.rows[0];
+    const ultimosPag = ultimosPagRes.rows;
+    const despAgg = despAggRes.rows[0];
+
+    const fmtMoeda = (v) => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmtData = (d) => d ? new Date(d).toLocaleDateString('pt-BR') : '—';
+    const tipoLabel = { casa: 'Casa', apartamento: 'Apartamento', comercial: 'Comercial', terreno: 'Terreno', galpao: 'Galpão' };
+    const statusLabel = { alugado: 'Alugado', vago: 'Vago', encerrado: 'Encerrado', negociacao: 'Negociação', manutencao: 'Em Manutenção' };
+    const statusPagLabel = { pago: 'Pago', pendente: 'Pendente', atrasado: 'Atrasado', parcial: 'Parcial' };
+
+    const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=ficha-imovel-${im.codigo}.pdf`);
+    doc.pipe(res);
+
+    desenharCabecalhoRelatorio(doc, {
+      titulo: 'Ficha Completa do Imóvel',
+      periodo: `Imóvel ${im.codigo} — ${im.endereco}`,
+      resumo: [
+        { label: 'Situação', valor: statusLabel[im.status] || im.status },
+        { label: 'Aluguel', valor: fmtMoeda(im.valor_com_desconto || im.valor_sem_desconto) }
+      ]
+    });
+
+    const M = doc.page.margins.left;
+    const W = doc.page.width - M * 2;
+    const maxY = () => doc.page.height - doc.page.margins.bottom;
+    const garantir = (h) => { if (doc.y + h > maxY()) { doc.addPage(); doc.y = doc.page.margins.top; } };
+
+    const tituloSecao = (txt) => {
+      garantir(40);
+      const y0 = doc.y;
+      doc.rect(M, y0, W, 20).fill('#eef2f8');
+      doc.fillColor('#1e3a5f').font('Helvetica-Bold').fontSize(11).text(txt, M + 8, y0 + 5, { width: W - 16, lineBreak: false });
+      doc.fillColor('#000000');
+      doc.y = y0 + 28;
+    };
+
+    const campos = (pares) => {
+      const colW = W / 2;
+      for (let i = 0; i < pares.length; i += 2) {
+        garantir(26);
+        const y0 = doc.y;
+        [pares[i], pares[i + 1]].forEach((p, j) => {
+          if (!p) return;
+          const x = M + j * colW;
+          doc.font('Helvetica').fontSize(8).fillColor('#888888').text(String(p.label).toUpperCase(), x, y0, { width: colW - 10, lineBreak: false });
+          doc.font('Helvetica-Bold').fontSize(10).fillColor('#222222').text(p.valor || '—', x, y0 + 10, { width: colW - 10, lineBreak: false });
+        });
+        doc.y = y0 + 26;
+      }
+    };
+
+    const paragrafo = (txt) => {
+      garantir(24);
+      doc.font('Helvetica').fontSize(9).fillColor('#333333').text(txt, M, doc.y, { width: W });
+      doc.y += 6;
+    };
+
+    const tabela = (colDefs, linhas) => {
+      const startX = M;
+      const larg = colDefs.reduce((s, c) => s + c.w, 0);
+      const drawHead = () => {
+        const hy = doc.y; let x = startX;
+        doc.font('Helvetica-Bold').fontSize(8).fillColor('#1e3a5f');
+        colDefs.forEach((c) => { doc.text(c.label, x, hy, { width: c.w, lineBreak: false }); x += c.w; });
+        const ly = hy + 12;
+        doc.moveTo(startX, ly).lineTo(startX + larg, ly).strokeColor('#1e3a5f').lineWidth(0.5).stroke();
+        doc.strokeColor('#000000').fillColor('#000000');
+        doc.y = ly + 3;
+      };
+      garantir(30);
+      drawHead();
+      linhas.forEach((row) => {
+        if (doc.y + 14 > maxY()) { doc.addPage(); doc.y = doc.page.margins.top; drawHead(); }
+        const ry = doc.y; let x = startX;
+        doc.font('Helvetica').fontSize(8).fillColor('#333333');
+        colDefs.forEach((c, idx) => { doc.text(String(row[idx] ?? '—'), x, ry, { width: c.w, lineBreak: false }); x += c.w; });
+        doc.y = ry + 13;
+      });
+      doc.y += 6;
+    };
+
+    // --- Dados cadastrais ---
+    tituloSecao('Dados do Imóvel');
+    campos([
+      { label: 'Código', valor: im.codigo },
+      { label: 'Tipo', valor: tipoLabel[im.tipo] || im.tipo },
+      { label: 'Endereço', valor: im.endereco },
+      { label: 'Situação', valor: statusLabel[im.status] || im.status },
+      { label: 'Valor (com desconto)', valor: im.valor_com_desconto ? fmtMoeda(im.valor_com_desconto) : '—' },
+      { label: 'Valor (sem desconto)', valor: fmtMoeda(im.valor_sem_desconto) },
+      { label: 'Dia de vencimento', valor: `Dia ${im.dia_vencimento}` },
+      { label: 'Matrícula', valor: im.matricula || '—' },
+      { label: 'Nº IPTU', valor: im.numero_iptu || '—' },
+      { label: 'Conta de água', valor: im.conta_agua || '—' },
+      { label: 'Conta de energia', valor: im.conta_energia || '—' }
+    ]);
+    if (im.observacoes) { tituloSecao('Observações'); paragrafo(im.observacoes); }
+
+    // --- Inquilino atual / contrato vigente ---
+    tituloSecao('Inquilino Atual / Contrato Vigente');
+    if (contrato) {
+      campos([
+        { label: 'Inquilino', valor: contrato.inquilino_nome },
+        { label: 'Documento', valor: contrato.inquilino_documento || '—' },
+        { label: 'Telefone', valor: contrato.inquilino_telefone || '—' },
+        { label: 'E-mail', valor: contrato.inquilino_email || '—' },
+        { label: 'Início do contrato', valor: fmtData(contrato.data_inicio) },
+        { label: 'Fim do contrato', valor: fmtData(contrato.data_fim) },
+        { label: 'Valor do aluguel', valor: fmtMoeda(contrato.valor) },
+        { label: 'Renovação automática', valor: contrato.renovacao_automatica !== false ? 'Sim' : 'Não' }
+      ]);
+    } else {
+      paragrafo('Imóvel sem contrato ativo no momento.');
+    }
+
+    // --- Resumo financeiro ---
+    tituloSecao('Resumo Financeiro');
+    campos([
+      { label: 'Total recebido (histórico)', valor: fmtMoeda(pagAgg.total_recebido) },
+      { label: 'Em aberto', valor: fmtMoeda(pagAgg.total_aberto) },
+      { label: 'Parcelas pagas', valor: String(pagAgg.pagos) },
+      { label: 'Parcelas atrasadas', valor: String(pagAgg.atrasados) },
+      { label: 'Despesas lançadas', valor: `${despAgg.qtd} (${fmtMoeda(despAgg.total)})` },
+      { label: 'Despesas em aberto', valor: fmtMoeda(despAgg.em_aberto) }
+    ]);
+
+    // --- Histórico de contratos ---
+    if (contratos.length > 0) {
+      tituloSecao('Histórico de Contratos');
+      tabela(
+        [
+          { label: 'Inquilino', w: 200 },
+          { label: 'Início', w: 90 },
+          { label: 'Fim', w: 90 },
+          { label: 'Valor', w: 75 },
+          { label: 'Situação', w: 60 }
+        ],
+        contratos.map((c) => [
+          c.inquilino_nome || '—', fmtData(c.data_inicio), fmtData(c.data_fim),
+          fmtMoeda(c.valor), (c.status || '').charAt(0).toUpperCase() + (c.status || '').slice(1)
+        ])
+      );
+    }
+
+    // --- Últimos pagamentos ---
+    if (ultimosPag.length > 0) {
+      tituloSecao('Últimos Pagamentos');
+      tabela(
+        [
+          { label: 'Referência', w: 90 },
+          { label: 'Vencimento', w: 90 },
+          { label: 'Valor', w: 80 },
+          { label: 'Recebido', w: 80 },
+          { label: 'Pagamento', w: 90 },
+          { label: 'Status', w: 75 }
+        ],
+        ultimosPag.map((p) => [
+          `${MESES_REL[p.mes - 1]}/${p.ano}`, fmtData(p.data_vencimento), fmtMoeda(p.valor_aluguel),
+          p.valor_recebido ? fmtMoeda(p.valor_recebido) : '—', fmtData(p.data_pagamento),
+          statusPagLabel[p.status] || p.status
+        ])
+      );
+    }
+
+    desenharRodapesRelatorio(doc);
+    doc.end();
+  } catch (error) {
+    console.error('Erro ao gerar ficha do imóvel:', error);
+    res.status(500).json({ error: 'Erro ao gerar ficha do imóvel' });
+  }
+});
+
 // ============================================================
 // CONTRATOS
 // ============================================================
