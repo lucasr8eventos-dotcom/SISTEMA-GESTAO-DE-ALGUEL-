@@ -15,26 +15,6 @@ export const formatDataHora = (data) => {
   return new Date(data).toLocaleString('pt-BR');
 };
 
-export const formatCpfCnpj = (valor) => {
-  if (!valor) return '—';
-  const v = valor.replace(/\D/g, '');
-  if (v.length === 11) {
-    return v.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
-  }
-  if (v.length === 14) {
-    return v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
-  }
-  return valor;
-};
-
-export const formatTelefone = (valor) => {
-  if (!valor) return '—';
-  const v = valor.replace(/\D/g, '');
-  if (v.length === 11) return v.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
-  if (v.length === 10) return v.replace(/(\d{2})(\d{4})(\d{4})/, '($1) $2-$3');
-  return valor;
-};
-
 export const MESES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'

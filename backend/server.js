@@ -1289,6 +1289,31 @@ app.post('/api/contratos/:id/reajustar', authenticateToken, [
       `UPDATE contratos SET valor=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
       [novoValor, id]
     );
+
+    // Propaga para o IMÓVEL: escala os valores (com/sem desconto) pelo mesmo
+    // percentual, preservando a relação de desconto e o reflexo na tela de Imóveis.
+    await client.query(
+      `UPDATE imoveis SET
+         valor_sem_desconto = ROUND(valor_sem_desconto * (1 + $1::numeric / 100), 2),
+         valor_com_desconto = CASE WHEN valor_com_desconto IS NOT NULL
+                                   THEN ROUND(valor_com_desconto * (1 + $1::numeric / 100), 2)
+                                   ELSE NULL END,
+         updated_at = NOW()
+       WHERE id = $2`,
+      [pctCalc, c.imovel_id]
+    );
+
+    // Propaga para as PARCELAS ainda não pagas a partir do mês do reajuste
+    // (mês atual em diante). Parcelas pagas/parciais e vencidas anteriores ficam
+    // como estavam. Isso atualiza a tela de Pagamentos e, por consequência, o Dashboard.
+    const parc = await client.query(
+      `UPDATE pagamentos SET valor_aluguel = $1, updated_at = NOW()
+       WHERE contrato_id = $2 AND status IN ('pendente','atrasado')
+         AND data_vencimento >= date_trunc('month', $3::date)
+       RETURNING id`,
+      [novoValor, id, dataReaj]
+    );
+
     await client.query(
       `INSERT INTO reajustes (imovel_id, contrato_id, valor_atual, data_ultimo, data_proximo, percentual, novo_valor, status, observacoes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,'aplicado',$8)`,
@@ -1296,7 +1321,7 @@ app.post('/api/contratos/:id/reajustar', authenticateToken, [
     );
     await client.query('COMMIT');
     await logAtividade(req.user.id, 'reajustar_contrato', 'contratos', parseInt(id), `${valorAtual} -> ${novoValor}`, req.ip);
-    res.json(upd.rows[0]);
+    res.json({ ...upd.rows[0], parcelas_atualizadas: parc.rowCount });
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('Erro ao reajustar contrato:', error.message);
