@@ -41,10 +41,10 @@ const FORMAS = [
 
 const STATUS_OPTIONS = [
   { value: '', label: 'Todos', color: 'gray' },
-  { value: 'pendente', label: 'Em aberto', color: 'warning' },
+  { value: 'pendente', label: 'Pendente', color: 'warning' },
   { value: 'parcial', label: 'Parcial', color: 'info' },
   { value: 'pago', label: 'Pago', color: 'success' },
-  { value: 'atrasado', label: 'Atrasado', color: 'danger' }
+  { value: 'atrasado', label: 'Vencido', color: 'danger' }
 ];
 
 const ALERTA_DIAS = 5;
@@ -321,7 +321,7 @@ export default function Despesas() {
           active={filtroStatus === 'pendente'}
           onClick={() => setFiltroStatus(filtroStatus === 'pendente' ? '' : 'pendente')}
         />
-        <MetricCard label="Atrasado" value={formatMoeda(stats.atrasado)} color="var(--danger)" active={filtroStatus === 'atrasado'} onClick={() => setFiltroStatus(filtroStatus === 'atrasado' ? '' : 'atrasado')} />
+        <MetricCard label="Vencido" value={formatMoeda(stats.atrasado)} color="var(--danger)" active={filtroStatus === 'atrasado'} onClick={() => setFiltroStatus(filtroStatus === 'atrasado' ? '' : 'atrasado')} />
       </div>
 
       {/* Filtros */}
@@ -368,11 +368,11 @@ export default function Despesas() {
             <table>
               <thead>
                 <tr>
-                  <th>Conta</th>
-                  <th>Categoria</th>
-                  <th>Imóvel</th>
-                  <th>Valor</th>
                   <th>Vencimento</th>
+                  <th>Descrição</th>
+                  <th>Imóvel</th>
+                  <th>Categoria</th>
+                  <th>Valor</th>
                   <th>Status</th>
                   <th>Ações</th>
                 </tr>
@@ -386,20 +386,6 @@ export default function Despesas() {
                   return (
                     <tr key={d.id} className={rowClass(d)}>
                       <td>
-                        <strong>{d.descricao || labelTipo(d.tipo)}</strong>
-                        {d.parcela_total > 1 && (
-                          <span className="chip" style={{ marginLeft: 6, fontSize: 11 }}>{d.parcela_num}/{d.parcela_total}</span>
-                        )}
-                      </td>
-                      <td><span className="chip">{labelTipo(d.tipo)}</span></td>
-                      <td>{d.imovel_codigo || <span style={{ color: 'var(--gray-400)' }}>Geral</span>}</td>
-                      <td>
-                        {formatMoeda(d.valor)}
-                        {d.status === 'parcial' && (
-                          <div style={{ fontSize: 11, color: 'var(--info)' }}>pago {formatMoeda(d.valor_pago)} · falta {formatMoeda(falta)}</div>
-                        )}
-                      </td>
-                      <td>
                         {formatData(d.vencimento)}
                         {proximo && (
                           <span className="badge badge-warning" style={{ marginLeft: 6, fontSize: 11 }}>
@@ -408,6 +394,20 @@ export default function Despesas() {
                         )}
                         {d.status === 'pago' && d.data_pagamento && (
                           <div style={{ fontSize: 11, color: 'var(--success)' }}>pago em {formatData(d.data_pagamento)}</div>
+                        )}
+                      </td>
+                      <td>
+                        <strong>{d.descricao || labelTipo(d.tipo)}</strong>
+                        {d.parcela_total > 1 && (
+                          <span className="chip" style={{ marginLeft: 6, fontSize: 11 }}>{d.parcela_num}/{d.parcela_total}</span>
+                        )}
+                      </td>
+                      <td>{d.imovel_codigo || <span style={{ color: 'var(--gray-400)' }}>Geral</span>}</td>
+                      <td><span className="chip">{labelTipo(d.tipo)}</span></td>
+                      <td>
+                        {formatMoeda(d.valor)}
+                        {d.status === 'parcial' && (
+                          <div style={{ fontSize: 11, color: 'var(--info)' }}>pago {formatMoeda(d.valor_pago)} · falta {formatMoeda(falta)}</div>
                         )}
                       </td>
                       <td><span className={`badge ${st.className}`}>{st.label}</span></td>
