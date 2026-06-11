@@ -396,6 +396,11 @@ export default function Agenda() {
           <option value="">Todos os imóveis</option>
           {imoveis.map((im) => <option key={im.id} value={im.id}>{im.codigo} — {im.endereco}</option>)}
         </select>
+        {(filtroTipo || filtroStatus || filtroImovel) && (
+          <button className="btn btn-ghost btn-sm" onClick={() => { setFiltroTipo(''); setFiltroStatus(''); setFiltroImovel(''); }}>
+            Limpar filtros
+          </button>
+        )}
       </div>
 
       {/* Legenda de cores */}
@@ -480,8 +485,8 @@ export default function Agenda() {
             </div>
             {eventosDoDia(ref).length === 0 ? (
               <div className="empty-state" style={{ padding: 32 }}>
-                <p style={{ color: 'var(--gray-500)' }}>Nenhum evento neste dia.</p>
-                <button className="btn btn-ghost btn-sm" onClick={abrirNovoManual}><Plus size={14} /> Adicionar evento</button>
+                <p style={{ color: 'var(--gray-500)' }}>Nenhum evento encontrado para este período. Clique em "Novo Evento" para cadastrar um compromisso.</p>
+                <button className="btn btn-ghost btn-sm" onClick={abrirNovoManual}><Plus size={14} /> Novo Evento</button>
               </div>
             ) : (
               <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
