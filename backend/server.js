@@ -1287,6 +1287,74 @@ app.post('/api/pagamentos/gerar-parcelas', authenticateToken, [
   }
 });
 
+// ===== Informar pagamento (dar baixa, igual Contas a Pagar) =====
+// Aceita pagamento total ou parcial, com juros/multa/desconto. O valor recebido
+// ACUMULA com baixas anteriores (ex.: quitar o restante de uma parcela parcial).
+app.post('/api/pagamentos/:id/pagar', authenticateToken, [
+  param('id').isInt({ min: 1 }),
+  body('data_pagamento').isDate(),
+  body('valor_recebido').isFloat({ gt: 0 }),
+  body('forma_pagamento').optional({ values: 'falsy' }).isIn(['dinheiro', 'pix', 'transferencia', 'boleto', 'cartao']),
+  body('juros').optional({ values: 'falsy' }).isFloat({ min: 0 }),
+  body('multa').optional({ values: 'falsy' }).isFloat({ min: 0 }),
+  body('desconto').optional({ values: 'falsy' }).isFloat({ min: 0 })
+], validate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data_pagamento, forma_pagamento, observacoes } = req.body;
+    const valorRecebido = parseFloat(req.body.valor_recebido);
+    const juros = parseFloat(req.body.juros || 0);
+    const multa = parseFloat(req.body.multa || 0);
+    const desconto = parseFloat(req.body.desconto || 0);
+
+    const atual = await pool.query('SELECT valor_aluguel, valor_recebido, juros, multa, desconto FROM pagamentos WHERE id=$1', [id]);
+    if (atual.rows.length === 0) return res.status(404).json({ error: 'Pagamento não encontrado' });
+
+    const a = atual.rows[0];
+    const novoRecebido = parseFloat(a.valor_recebido || 0) + valorRecebido;
+    const novoJuros = parseFloat(a.juros || 0) + juros;
+    const novoMulta = parseFloat(a.multa || 0) + multa;
+    const novoDesconto = parseFloat(a.desconto || 0) + desconto;
+
+    // Saldo devido: aluguel + juros + multa - desconto
+    const totalDevido = parseFloat(a.valor_aluguel) + novoJuros + novoMulta - novoDesconto;
+    const status = novoRecebido >= (totalDevido - 0.005) ? 'pago' : 'parcial';
+
+    const result = await pool.query(
+      `UPDATE pagamentos SET status=$1, data_pagamento=$2, valor_recebido=$3, forma_pagamento=$4,
+        juros=$5, multa=$6, desconto=$7, observacoes=COALESCE($8, observacoes), updated_at=NOW()
+       WHERE id=$9 RETURNING *`,
+      [status, data_pagamento, novoRecebido, forma_pagamento || null, novoJuros, novoMulta, novoDesconto, observacoes || null, id]
+    );
+
+    await logAtividade(req.user.id, 'informar_pagamento', 'pagamentos', parseInt(id), status, req.ip);
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Erro ao informar pagamento:', error.message);
+    res.status(500).json({ error: 'Erro ao informar pagamento' });
+  }
+});
+
+// ===== Reabrir (estornar a baixa) — volta para pendente =====
+app.post('/api/pagamentos/:id/reabrir', authenticateToken, [
+  param('id').isInt({ min: 1 })
+], validate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `UPDATE pagamentos SET status='pendente', data_pagamento=NULL, valor_recebido=NULL,
+        forma_pagamento=NULL, juros=0, multa=0, desconto=0, updated_at=NOW()
+       WHERE id=$1 RETURNING *`,
+      [id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Pagamento não encontrado' });
+    await logAtividade(req.user.id, 'reabrir_pagamento', 'pagamentos', parseInt(id), null, req.ip);
+    res.json(result.rows[0]);
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao reabrir' });
+  }
+});
+
 app.post('/api/pagamentos', authenticateToken, [
   body('mes').isInt({ min: 1, max: 12 }),
   body('ano').isInt({ min: 2000, max: 2099 }),
@@ -3366,6 +3434,11 @@ async function runMigrations() {
 
     // Renovação automática anual de contratos
     await pool.query(`ALTER TABLE contratos ADD COLUMN IF NOT EXISTS renovacao_automatica BOOLEAN NOT NULL DEFAULT true`);
+
+    // Pagamentos — encargos no "informar pagamento" (igual Contas a Pagar)
+    await pool.query(`ALTER TABLE pagamentos ADD COLUMN IF NOT EXISTS juros DECIMAL(10,2) DEFAULT 0`);
+    await pool.query(`ALTER TABLE pagamentos ADD COLUMN IF NOT EXISTS multa DECIMAL(10,2) DEFAULT 0`);
+    await pool.query(`ALTER TABLE pagamentos ADD COLUMN IF NOT EXISTS desconto DECIMAL(10,2) DEFAULT 0`);
 
     // Agenda — eventos manuais persistidos no banco
     await pool.query(`

@@ -107,10 +107,9 @@ export default function Despesas() {
     setLoading(true);
     setErro(null);
     try {
+      // Busca o período inteiro (mês/ano). status/tipo/imóvel filtram só a tabela
+      // (client-side), para que os cards mostrem sempre o resumo geral do período.
       const res = await despesasService.listar({
-        status: filtroStatus || undefined,
-        tipo: filtroTipo || undefined,
-        imovel_id: filtroImovel || undefined,
         mes: filtroMes || undefined,
         ano: filtroAno || undefined
       });
@@ -120,7 +119,7 @@ export default function Despesas() {
     } finally {
       setLoading(false);
     }
-  }, [filtroStatus, filtroTipo, filtroImovel, filtroMes, filtroAno]);
+  }, [filtroMes, filtroAno]);
 
   useEffect(() => { fetchDespesas(); }, [fetchDespesas]);
   useEffect(() => { setPage(1); }, [filtroStatus, filtroTipo, filtroImovel, filtroMes, filtroAno]);
@@ -253,11 +252,11 @@ export default function Despesas() {
     }
   };
 
-  // ===== Stats =====
-  const stats = useMemo(() => {
+  // Resume uma lista de contas (cards do período e resumo do filtro)
+  const resumir = (lista) => {
     const counts = { pendente: 0, pago: 0, atrasado: 0, parcial: 0 };
     let total = 0, pago = 0, aberto = 0, atrasado = 0, proximas = 0;
-    despesas.forEach((d) => {
+    lista.forEach((d) => {
       counts[d.status] = (counts[d.status] || 0) + 1;
       total += parseFloat(d.valor || 0);
       // Conta marcada "pago" sem valor_pago (ex.: criada direto como paga) deve
@@ -272,9 +271,24 @@ export default function Despesas() {
       if ((d.status === 'pendente' || d.status === 'parcial') && dias !== null && dias >= 0 && dias <= ALERTA_DIAS) proximas += 1;
     });
     return { counts, total, pago, aberto, atrasado, proximas };
-  }, [despesas]);
+  };
 
-  const paginated = despesas.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+  // ===== Filtros client-side (afetam só a tabela): status + tipo + imóvel =====
+  const despesasFiltradas = useMemo(() => {
+    return despesas.filter((d) => {
+      if (filtroStatus && d.status !== filtroStatus) return false;
+      if (filtroTipo && String(d.tipo) !== String(filtroTipo)) return false;
+      if (filtroImovel && String(d.imovel_id) !== String(filtroImovel)) return false;
+      return true;
+    });
+  }, [despesas, filtroStatus, filtroTipo, filtroImovel]);
+
+  // Cards = resumo geral do PERÍODO (ignora status/tipo/imóvel)
+  const stats = useMemo(() => resumir(despesas), [despesas]);
+  // Resumo do filtro aplicado (área separada)
+  const statsFiltro = useMemo(() => resumir(despesasFiltradas), [despesasFiltradas]);
+
+  const paginated = despesasFiltradas.slice((page - 1) * PER_PAGE, page * PER_PAGE);
   const hasFiltrosAtivos = !!filtroStatus || !!filtroTipo || !!filtroImovel || !!filtroMes || !!filtroAno;
   const limparFiltros = () => {
     setFiltroStatus(''); setFiltroTipo(''); setFiltroImovel(''); setFiltroMes(''); setFiltroAno('');
@@ -347,14 +361,31 @@ export default function Despesas() {
         </div>
       </FilterBar>
 
+      {/* Resumo do filtro aplicado — separado do resumo geral do período (cards) */}
+      {(filtroStatus || filtroTipo || filtroImovel) && despesasFiltradas.length > 0 && (
+        <div className="card" style={{ marginBottom: 16, padding: '12px 16px' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-600)', marginBottom: 8 }}>
+            Resumo do filtro aplicado
+            <span style={{ fontWeight: 400, color: 'var(--gray-500)' }}> · {despesasFiltradas.length} item(ns)</span>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, fontSize: 14 }}>
+            <div><span style={{ color: 'var(--gray-500)' }}>Total: </span><strong>{formatMoeda(statsFiltro.total)}</strong></div>
+            <div><span style={{ color: 'var(--gray-500)' }}>Pago: </span><strong style={{ color: 'var(--success)' }}>{formatMoeda(statsFiltro.pago)}</strong></div>
+            <div><span style={{ color: 'var(--gray-500)' }}>Em aberto: </span><strong style={{ color: 'var(--warning)' }}>{formatMoeda(statsFiltro.aberto)}</strong></div>
+            <div><span style={{ color: 'var(--gray-500)' }}>Vencido: </span><strong style={{ color: 'var(--danger)' }}>{formatMoeda(statsFiltro.atrasado)}</strong></div>
+          </div>
+          <div className="form-hint" style={{ marginTop: 6 }}>Os cards acima mostram sempre o total geral do período.</div>
+        </div>
+      )}
+
       {erro && <ErrorState message={erro} onRetry={fetchDespesas} />}
 
       <div className="card">
         <div className="table-wrapper">
           {loading ? (
             <div className="loading-spinner"><div className="spinner" /></div>
-          ) : despesas.length === 0 ? (
-            hasFiltrosAtivos ? (
+          ) : despesasFiltradas.length === 0 ? (
+            (hasFiltrosAtivos || despesas.length > 0) ? (
               <EmptyFiltered onClear={limparFiltros} icon={<Receipt size={48} />} />
             ) : (
               <EmptyState
@@ -434,7 +465,7 @@ export default function Despesas() {
             </table>
           )}
         </div>
-        <Pagination total={despesas.length} page={page} perPage={PER_PAGE} onChange={setPage} />
+        <Pagination total={despesasFiltradas.length} page={page} perPage={PER_PAGE} onChange={setPage} />
       </div>
 
       {/* ===== Modal cadastro/edição ===== */}
