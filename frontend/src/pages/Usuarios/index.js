@@ -4,9 +4,14 @@ import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
 import { formatDataHora } from '../../utils/format';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Pencil, Trash2, Eye, EyeOff, Power } from 'lucide-react';
 
-const FORM_INICIAL = { nome: '', email: '', senha: '', perfil: 'operador', status: 'ativo' };
+const FORM_INICIAL = { nome: '', email: '', senha: '', confirmaSenha: '', perfil: 'operador', status: 'ativo' };
+
+const PERFIL_DESC = {
+  admin: 'Administrador: acesso total — gerencia usuários, exclui registros e acessa todas as áreas.',
+  operador: 'Operador: cadastra e gerencia imóveis, contratos, pagamentos e despesas. Não acessa Usuários nem exclui registros.'
+};
 
 export default function Usuarios() {
   const [usuarios, setUsuarios] = useState([]);
@@ -16,6 +21,7 @@ export default function Usuarios() {
   const [form, setForm] = useState(FORM_INICIAL);
   const [editando, setEditando] = useState(null);
   const [salvando, setSalvando] = useState(false);
+  const [mostrarSenha, setMostrarSenha] = useState(false);
   const toast = useToast();
   const { usuario: usuarioLogado } = useAuth();
 
@@ -35,13 +41,15 @@ export default function Usuarios() {
 
   const abrirNovo = () => {
     setEditando(null);
+    setMostrarSenha(false);
     setForm(FORM_INICIAL);
     setModalAberto(true);
   };
 
   const abrirEditar = (u) => {
     setEditando(u.id);
-    setForm({ nome: u.nome || '', email: u.email || '', senha: '', perfil: u.perfil || 'operador', status: u.status || 'ativo' });
+    setMostrarSenha(false);
+    setForm({ nome: u.nome || '', email: u.email || '', senha: '', confirmaSenha: '', perfil: u.perfil || 'operador', status: u.status || 'ativo' });
     setModalAberto(true);
   };
 
@@ -51,9 +59,18 @@ export default function Usuarios() {
       toast.error('Informe uma senha');
       return;
     }
+    if (form.senha && form.senha.length < 6) {
+      toast.error('A senha deve ter ao menos 6 caracteres');
+      return;
+    }
+    if (form.senha && form.senha !== form.confirmaSenha) {
+      toast.error('As senhas não conferem');
+      return;
+    }
     setSalvando(true);
     try {
       const dados = { ...form };
+      delete dados.confirmaSenha;
       if (!dados.senha) delete dados.senha;
 
       if (editando) {
@@ -80,6 +97,17 @@ export default function Usuarios() {
       fetchUsuarios();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erro ao excluir');
+    }
+  };
+
+  const alternarStatus = async (u) => {
+    const novo = u.status === 'ativo' ? 'inativo' : 'ativo';
+    try {
+      await usuariosService.atualizar(u.id, { nome: u.nome, email: u.email, perfil: u.perfil, status: novo });
+      toast.success(novo === 'ativo' ? 'Usuário reativado!' : 'Usuário desativado!');
+      fetchUsuarios();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erro ao alterar status');
     }
   };
 
@@ -136,6 +164,13 @@ export default function Usuarios() {
                       <div className="table-actions">
                         <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => abrirEditar(u)}><Pencil size={14} /></button>
                         {u.id !== usuarioLogado?.id && (
+                          <button
+                            className="btn btn-ghost btn-sm btn-icon"
+                            title={u.status === 'ativo' ? 'Desativar (recomendado)' : 'Reativar'}
+                            onClick={() => alternarStatus(u)}
+                          ><Power size={14} color={u.status === 'ativo' ? 'var(--warning)' : 'var(--success)'} /></button>
+                        )}
+                        {u.id !== usuarioLogado?.id && (
                           <button className="btn btn-outline-danger btn-sm btn-icon" title="Excluir" onClick={() => setConfirmExcluir(u)}><Trash2 size={14} /></button>
                         )}
                       </div>
@@ -170,12 +205,48 @@ export default function Usuarios() {
             <label className="form-label">E-mail <span className="required">*</span></label>
             <input className="form-control" type="email" value={form.email} onChange={(e) => setF('email', e.target.value)} required />
           </div>
-          <div className="form-group">
-            <label className="form-label">
-              Senha {!editando && <span className="required">*</span>}
-              {editando && <span className="form-hint" style={{ display: 'inline', marginLeft: 6 }}>(deixe em branco para não alterar)</span>}
-            </label>
-            <input className="form-control" type="password" value={form.senha} onChange={(e) => setF('senha', e.target.value)} minLength={6} />
+          <div className="form-grid">
+            <div className="form-group">
+              <label className="form-label">
+                Senha {!editando && <span className="required">*</span>}
+                {editando && <span className="form-hint" style={{ display: 'inline', marginLeft: 6 }}>(em branco = não alterar)</span>}
+              </label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  className="form-control"
+                  type={mostrarSenha ? 'text' : 'password'}
+                  value={form.senha}
+                  onChange={(e) => setF('senha', e.target.value)}
+                  minLength={6}
+                  style={{ paddingRight: 38 }}
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setMostrarSenha((v) => !v)}
+                  title={mostrarSenha ? 'Ocultar senha' : 'Mostrar senha'}
+                  style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gray-500)', padding: 0, lineHeight: 0 }}
+                >
+                  {mostrarSenha ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">
+                Confirmar senha {!editando && <span className="required">*</span>}
+              </label>
+              <input
+                className="form-control"
+                type={mostrarSenha ? 'text' : 'password'}
+                value={form.confirmaSenha}
+                onChange={(e) => setF('confirmaSenha', e.target.value)}
+                minLength={6}
+                autoComplete="new-password"
+              />
+              {form.confirmaSenha && form.senha !== form.confirmaSenha && (
+                <div className="form-hint" style={{ color: 'var(--danger)' }}>As senhas não conferem.</div>
+              )}
+            </div>
           </div>
           <div className="form-grid">
             <div className="form-group">
@@ -184,6 +255,7 @@ export default function Usuarios() {
                 <option value="admin">Administrador</option>
                 <option value="operador">Operador</option>
               </select>
+              <div className="form-hint">{PERFIL_DESC[form.perfil]}</div>
             </div>
             <div className="form-group">
               <label className="form-label">Status <span className="required">*</span></label>
@@ -201,7 +273,7 @@ export default function Usuarios() {
         onClose={() => setConfirmExcluir(null)}
         onConfirm={handleExcluir}
         title="Excluir Usuário"
-        message={`Tem certeza que deseja excluir o usuário "${confirmExcluir?.nome}"?`}
+        message={`Tem certeza que deseja EXCLUIR o usuário "${confirmExcluir?.nome}"? Esta ação é permanente. Para preservar o histórico, prefira desativar o usuário (botão com ícone de energia).`}
       />
     </div>
   );
