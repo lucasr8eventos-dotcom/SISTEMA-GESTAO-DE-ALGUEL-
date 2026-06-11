@@ -116,16 +116,6 @@ export default function Imoveis() {
     return `IM${String(maior + 1).padStart(3, '0')}`;
   };
 
-  const abrirNovo = () => {
-    setEditando(null);
-    setErros({});
-    setForm({ ...FORM_IMOVEL_INICIAL, codigo: sugerirCodigo() });
-    setFormInquilino(FORM_INQUILINO_INICIAL);
-    setInquilinoVinculado(null);
-    setAbaAtiva('dados');
-    setModalAberto(true);
-  };
-
   const carregarInquilinoDoImovel = async (imovelId) => {
     try {
       const res = await contratosService.listar();
@@ -310,8 +300,7 @@ export default function Imoveis() {
           <p>Gerencie os imóveis cadastrados, status de locação e dados principais.</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-ghost" onClick={() => setCadastroCompleto(true)}>Cadastro completo</button>
-          <button className="btn btn-primary" onClick={abrirNovo}>+ Novo Imóvel</button>
+          <button className="btn btn-primary" onClick={() => setCadastroCompleto(true)}>+ Novo Imóvel</button>
         </div>
       </div>
 
@@ -638,7 +627,8 @@ export default function Imoveis() {
       <CadastroCompleto
         isOpen={cadastroCompleto}
         onClose={() => setCadastroCompleto(false)}
-        onDone={fetchImoveis}
+        onDone={() => { fetchImoveis(); fetchTodos(); }}
+        codigoSugerido={sugerirCodigo()}
         toast={toast}
       />
     </div>

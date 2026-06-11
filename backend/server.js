@@ -1224,6 +1224,88 @@ app.delete('/api/contratos/:id', authenticateToken, authorizeAdmin, [
   }
 });
 
+// ===== Informar renovação do contrato (estende a vigência em N anos) =====
+app.post('/api/contratos/:id/renovar', authenticateToken, [
+  param('id').isInt({ min: 1 }),
+  body('anos').optional({ values: 'falsy' }).isInt({ min: 1, max: 10 }),
+  body('data_fim').optional({ values: 'falsy' }).isDate()
+], validate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const atual = await pool.query('SELECT id, data_fim, status FROM contratos WHERE id=$1', [id]);
+    if (atual.rows.length === 0) return res.status(404).json({ error: 'Contrato não encontrado' });
+
+    // Nova data fim: informada manualmente OU vigência atual + N anos (padrão 1)
+    let novaDataFim;
+    if (req.body.data_fim) {
+      novaDataFim = req.body.data_fim;
+    } else {
+      const anos = parseInt(req.body.anos || 1, 10);
+      const base = new Date(atual.rows[0].data_fim);
+      base.setFullYear(base.getFullYear() + anos);
+      novaDataFim = base.toISOString().split('T')[0];
+    }
+
+    const result = await pool.query(
+      `UPDATE contratos SET data_fim=$1, status='ativo', updated_at=NOW() WHERE id=$2 RETURNING *`,
+      [novaDataFim, id]
+    );
+    await logAtividade(req.user.id, 'renovar_contrato', 'contratos', parseInt(id), `nova vigência até ${novaDataFim}`, req.ip);
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Erro ao renovar contrato:', error.message);
+    res.status(500).json({ error: 'Erro ao renovar contrato' });
+  }
+});
+
+// ===== Informar reajuste do contrato (atualiza o valor + registra histórico) =====
+app.post('/api/contratos/:id/reajustar', authenticateToken, [
+  param('id').isInt({ min: 1 }),
+  body('novo_valor').optional({ values: 'falsy' }).isFloat({ gt: 0 }),
+  body('percentual').optional({ values: 'falsy' }).isFloat({ min: 0, max: 100 }),
+  body('data').optional({ values: 'falsy' }).isDate()
+], validate, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const atual = await client.query('SELECT id, imovel_id, valor FROM contratos WHERE id=$1', [id]);
+    if (atual.rows.length === 0) { client.release(); return res.status(404).json({ error: 'Contrato não encontrado' }); }
+    const c = atual.rows[0];
+    const valorAtual = parseFloat(c.valor || 0);
+
+    const percentual = req.body.percentual != null && req.body.percentual !== '' ? parseFloat(req.body.percentual) : null;
+    let novoValor;
+    if (req.body.novo_valor) novoValor = parseFloat(req.body.novo_valor);
+    else if (percentual != null) novoValor = Number((valorAtual * (1 + percentual / 100)).toFixed(2));
+    else { client.release(); return res.status(400).json({ error: 'Informe o novo valor ou o percentual do reajuste.' }); }
+
+    const pctCalc = percentual != null ? percentual : (valorAtual > 0 ? Number((((novoValor - valorAtual) / valorAtual) * 100).toFixed(2)) : 0);
+    const dataReaj = req.body.data || new Date().toISOString().split('T')[0];
+    const proximo = new Date(dataReaj); proximo.setFullYear(proximo.getFullYear() + 1);
+    const dataProximo = proximo.toISOString().split('T')[0];
+
+    await client.query('BEGIN');
+    const upd = await client.query(
+      `UPDATE contratos SET valor=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
+      [novoValor, id]
+    );
+    await client.query(
+      `INSERT INTO reajustes (imovel_id, contrato_id, valor_atual, data_ultimo, data_proximo, percentual, novo_valor, status, observacoes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'aplicado',$8)`,
+      [c.imovel_id, id, valorAtual, dataReaj, dataProximo, pctCalc, novoValor, req.body.observacoes || 'Reajuste informado pela tela de contratos']
+    );
+    await client.query('COMMIT');
+    await logAtividade(req.user.id, 'reajustar_contrato', 'contratos', parseInt(id), `${valorAtual} -> ${novoValor}`, req.ip);
+    res.json(upd.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Erro ao reajustar contrato:', error.message);
+    res.status(500).json({ error: 'Erro ao reajustar contrato' });
+  } finally {
+    client.release();
+  }
+});
+
 // ============================================================
 // PAGAMENTOS
 // ============================================================
@@ -2739,6 +2821,97 @@ app.get('/api/relatorios/exportar/pdf', authenticateToken, async (req, res) => {
     doc.end();
   } catch (error) {
     res.status(500).json({ error: 'Erro ao exportar PDF' });
+  }
+});
+
+// Lista condensada de TODOS os imóveis (fichas resumidas, ~uma linha por imóvel)
+app.get('/api/relatorios/imoveis/fichas-lista/pdf', authenticateToken, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT i.codigo, i.tipo, i.endereco, i.status, i.dia_vencimento,
+             i.valor_com_desconto, i.valor_sem_desconto,
+             inq.nome AS inquilino_nome, c.valor AS contrato_valor
+      FROM imoveis i
+      LEFT JOIN LATERAL (
+        SELECT * FROM contratos c2 WHERE c2.imovel_id = i.id AND c2.status = 'ativo'
+        ORDER BY c2.id DESC LIMIT 1
+      ) c ON true
+      LEFT JOIN inquilinos inq ON inq.id = c.inquilino_id
+      ORDER BY i.codigo
+    `);
+
+    const fmtMoeda = (v) => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const tipoLabel = { casa: 'Casa', apartamento: 'Apto', comercial: 'Comercial', terreno: 'Terreno', galpao: 'Galpão' };
+    const statusLabel = { alugado: 'Alugado', vago: 'Vago', encerrado: 'Encerrado', negociacao: 'Negociação', manutencao: 'Manutenção' };
+
+    const alugados = rows.filter(r => r.status === 'alugado').length;
+    const vagos = rows.filter(r => r.status === 'vago').length;
+
+    const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=fichas-imoveis-lista-${new Date().toISOString().split('T')[0]}.pdf`);
+    doc.pipe(res);
+
+    desenharCabecalhoRelatorio(doc, {
+      titulo: 'Fichas dos Imóveis — Lista Resumida',
+      periodo: `Emissão consolidada de todos os imóveis`,
+      resumo: [
+        { label: 'Imóveis', valor: String(rows.length) },
+        { label: 'Alugados', valor: String(alugados) },
+        { label: 'Vagos', valor: String(vagos) }
+      ]
+    });
+
+    const defs = [
+      { key: 'codigo', label: 'Código', w: 52 },
+      { key: 'tipo', label: 'Tipo', w: 58 },
+      { key: 'endereco', label: 'Endereço', w: 140 },
+      { key: 'status', label: 'Situação', w: 62 },
+      { key: 'inquilino_nome', label: 'Inquilino', w: 103 },
+      { key: 'aluguel', label: 'Aluguel', w: 60 },
+      { key: 'venc', label: 'Venc.', w: 40 }
+    ];
+    const startX = doc.page.margins.left;
+    const larg = defs.reduce((s, d) => s + d.w, 0);
+    const drawHead = () => {
+      const hy = doc.y; let x = startX;
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#1e3a5f');
+      defs.forEach((d) => { doc.text(d.label, x, hy, { width: d.w, lineBreak: false }); x += d.w; });
+      const ly = hy + 12;
+      doc.moveTo(startX, ly).lineTo(startX + larg, ly).strokeColor('#1e3a5f').lineWidth(0.5).stroke();
+      doc.strokeColor('#000000').fillColor('#000000');
+      doc.y = ly + 3;
+    };
+    drawHead();
+
+    rows.forEach((r) => {
+      if (doc.y > doc.page.height - doc.page.margins.bottom - 20) {
+        doc.addPage();
+        doc.y = doc.page.margins.top;
+        drawHead();
+      }
+      const ry = doc.y; let x = startX;
+      const aluguel = r.contrato_valor != null ? r.contrato_valor : (r.valor_com_desconto || r.valor_sem_desconto);
+      const trunc = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
+      const valores = {
+        codigo: r.codigo,
+        tipo: tipoLabel[r.tipo] || r.tipo,
+        endereco: trunc(r.endereco || '—', 30),
+        status: statusLabel[r.status] || r.status,
+        inquilino_nome: trunc(r.inquilino_nome || '—', 22),
+        aluguel: fmtMoeda(aluguel),
+        venc: `Dia ${r.dia_vencimento}`
+      };
+      doc.fontSize(8).font('Helvetica').fillColor('#333333');
+      defs.forEach((d) => { doc.text(String(valores[d.key] ?? '—'), x, ry, { width: d.w, lineBreak: false }); x += d.w; });
+      doc.y = ry + 14;
+    });
+
+    desenharRodapesRelatorio(doc);
+    doc.end();
+  } catch (error) {
+    console.error('Erro ao gerar lista de fichas:', error.message);
+    res.status(500).json({ error: 'Erro ao gerar lista de fichas' });
   }
 });
 
