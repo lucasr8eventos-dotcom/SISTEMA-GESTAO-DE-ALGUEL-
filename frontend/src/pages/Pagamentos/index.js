@@ -48,6 +48,8 @@ export default function Pagamentos() {
   const [filtroStatus, setFiltroStatus] = useState('');
   const [filtroInquilino, setFiltroInquilino] = useState('');
   const [busca, setBusca] = useState('');
+  const [filtroDataInicio, setFiltroDataInicio] = useState('');
+  const [filtroDataFim, setFiltroDataFim] = useState('');
   const [modalAberto, setModalAberto] = useState(false);
   const [confirmExcluir, setConfirmExcluir] = useState(null);
   const [form, setForm] = useState(FORM_INICIAL);
@@ -77,13 +79,19 @@ export default function Pagamentos() {
     if (ano) setFiltroAno(ano);
   }, [location.search]);
 
+  // Quando há intervalo de datas, ele substitui o filtro de mês/ano.
+  const usandoIntervalo = !!(filtroDataInicio || filtroDataFim);
+
   const fetchPagamentos = useCallback(async () => {
     setLoading(true);
     setErro(null);
+    const comIntervalo = !!(filtroDataInicio || filtroDataFim);
     try {
       const res = await pagamentosService.listar({
-        mes: filtroMes || undefined,
-        ano: filtroAno || undefined,
+        mes: comIntervalo ? undefined : (filtroMes || undefined),
+        ano: comIntervalo ? undefined : (filtroAno || undefined),
+        data_inicio: filtroDataInicio || undefined,
+        data_fim: filtroDataFim || undefined,
         status: filtroStatus || undefined,
         busca: busca || undefined
       });
@@ -93,10 +101,12 @@ export default function Pagamentos() {
     } finally {
       setLoading(false);
     }
-  }, [filtroMes, filtroAno, filtroStatus, busca]);
+  }, [filtroMes, filtroAno, filtroStatus, busca, filtroDataInicio, filtroDataFim]);
 
   // Pagamentos do mês anterior pra comparativo (sem afetar exibição)
   const fetchPagamentosAnterior = useCallback(async () => {
+    // Comparativo não faz sentido com intervalo de datas custom
+    if (filtroDataInicio || filtroDataFim) { setPagamentosAnterior([]); return; }
     if (!filtroMes || !filtroAno) { setPagamentosAnterior([]); return; }
     const m = parseInt(filtroMes);
     const a = parseInt(filtroAno);
@@ -108,7 +118,7 @@ export default function Pagamentos() {
     } catch {
       setPagamentosAnterior([]);
     }
-  }, [filtroMes, filtroAno]);
+  }, [filtroMes, filtroAno, filtroDataInicio, filtroDataFim]);
 
   useEffect(() => {
     const t = setTimeout(fetchPagamentos, 300);
@@ -120,7 +130,7 @@ export default function Pagamentos() {
     return () => clearTimeout(t);
   }, [fetchPagamentosAnterior]);
 
-  useEffect(() => { setPage(1); }, [filtroMes, filtroAno, filtroStatus, filtroInquilino, busca]);
+  useEffect(() => { setPage(1); }, [filtroMes, filtroAno, filtroStatus, filtroInquilino, busca, filtroDataInicio, filtroDataFim]);
 
   useEffect(() => {
     Promise.all([
@@ -376,7 +386,7 @@ export default function Pagamentos() {
   };
 
   const hasFiltrosAtivos =
-    !!filtroStatus || !!filtroInquilino || !!busca ||
+    !!filtroStatus || !!filtroInquilino || !!busca || !!filtroDataInicio || !!filtroDataFim ||
     !!(filtroMes && filtroAno && (filtroMes !== getMesAtual() || filtroAno !== getAnoAtual()));
 
   const limparFiltros = () => {
@@ -385,6 +395,8 @@ export default function Pagamentos() {
     setFiltroStatus('');
     setFiltroInquilino('');
     setBusca('');
+    setFiltroDataInicio('');
+    setFiltroDataFim('');
   };
 
   const hasDadosCadastrados = pagamentos.length > 0 || !!filtroStatus || !!busca; // heurística: se NÃO tem nada no mês atual sem filtros, pode ser que não tem cadastrados
@@ -470,6 +482,15 @@ export default function Pagamentos() {
           ano={filtroAno}
           onChange={({ mes, ano }) => { setFiltroMes(mes); setFiltroAno(ano); }}
         />
+        <div className="filter-field">
+          <label className="filter-label">Vencimento — intervalo</label>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input type="date" className="form-control" value={filtroDataInicio} onChange={(e) => setFiltroDataInicio(e.target.value)} title="Data inicial" />
+            <span style={{ color: 'var(--gray-400)' }}>até</span>
+            <input type="date" className="form-control" value={filtroDataFim} onChange={(e) => setFiltroDataFim(e.target.value)} title="Data final" />
+          </div>
+          {usandoIntervalo && <div className="form-hint">Usando intervalo — o filtro de mês/ano fica ignorado.</div>}
+        </div>
         <SearchInput
           value={busca}
           onChange={setBusca}

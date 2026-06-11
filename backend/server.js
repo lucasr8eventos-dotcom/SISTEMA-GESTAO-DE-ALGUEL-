@@ -1230,7 +1230,8 @@ app.delete('/api/contratos/:id', authenticateToken, authorizeAdmin, [
 
 app.get('/api/pagamentos', authenticateToken, async (req, res) => {
   try {
-    const { mes, ano, imovel_id, status, busca } = req.query;
+    const { mes, ano, imovel_id, status, busca, data_inicio, data_fim } = req.query;
+    const dataRe = /^\d{4}-\d{2}-\d{2}$/;
     let queryStr = `
       SELECT p.*, i.codigo as imovel_codigo, i.endereco as imovel_endereco,
              c.inquilino_id as inquilino_id,
@@ -1245,6 +1246,9 @@ app.get('/api/pagamentos', authenticateToken, async (req, res) => {
 
     if (mes) { params.push(mes); conditions.push(`p.mes = $${params.length}`); }
     if (ano) { params.push(ano); conditions.push(`p.ano = $${params.length}`); }
+    // Intervalo por data de vencimento (tem prioridade sobre mes/ano quando informado)
+    if (data_inicio && dataRe.test(data_inicio)) { params.push(data_inicio); conditions.push(`p.data_vencimento >= $${params.length}`); }
+    if (data_fim && dataRe.test(data_fim)) { params.push(data_fim); conditions.push(`p.data_vencimento <= $${params.length}`); }
     if (imovel_id) { params.push(imovel_id); conditions.push(`p.imovel_id = $${params.length}`); }
     if (status) { params.push(status); conditions.push(`p.status = $${params.length}`); }
     if (busca) {
