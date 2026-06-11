@@ -9,7 +9,10 @@ const pageTitles = {
   '/imoveis': { title: 'Imóveis', subtitle: 'Cadastro e gerenciamento de imóveis' },
   '/contratos': { title: 'Contratos', subtitle: 'Gerenciamento de contratos' },
   '/pagamentos': { title: 'Pagamentos', subtitle: 'Controle mensal de aluguéis' },
-  '/despesas': { title: 'Despesas', subtitle: 'Despesas fixas dos imóveis' },
+  '/inadimplencia': { title: 'Inadimplência', subtitle: 'Aluguéis em atraso e cobranças' },
+  '/despesas': { title: 'Contas a Pagar', subtitle: 'Contas e despesas a pagar' },
+  '/contas-a-pagar': { title: 'Contas a Pagar', subtitle: 'Contas e despesas a pagar' },
+  '/recibos': { title: 'Recibos', subtitle: 'Geração e histórico de recibos' },
   '/relatorios': { title: 'Relatórios', subtitle: 'Relatórios e exportações' },
   '/usuarios': { title: 'Usuários', subtitle: 'Gerenciamento de usuários do sistema' }
 };

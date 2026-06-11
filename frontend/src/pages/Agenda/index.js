@@ -129,7 +129,7 @@ const gerarEventosDespesas = (despesas) => {
       id: `desp-${d.id}`, tipo: 'despesa',
       titulo: `Conta — ${d.descricao || d.tipo || 'Outro'} / ${d.imovel_codigo || 'Geral'}`,
       data, hora: '', cor, status,
-      navegar: `/despesas`, meta: { imovel_id: d.imovel_id }
+      navegar: `/contas-a-pagar`, meta: { imovel_id: d.imovel_id }
     };
   }).filter(Boolean);
 };

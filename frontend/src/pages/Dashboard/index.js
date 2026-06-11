@@ -151,7 +151,7 @@ export default function Dashboard() {
           value={formatMoeda(stats.despesasMes)}
           label={`Despesas — ${mesAtual}`}
           color="var(--warning)"
-          onClick={() => navigate('/despesas')}
+          onClick={() => navigate('/contas-a-pagar')}
         />
         <StatCard
           icon={<FileText size={22} />}
@@ -283,7 +283,7 @@ export default function Dashboard() {
                 value={stats.alertas.despesasAtrasadas}
                 description="Despesas com pagamento em atraso"
                 color="var(--warning)"
-                onClick={() => navigate('/despesas?status=atrasado')}
+                onClick={() => navigate('/contas-a-pagar?status=atrasado')}
               />
             )}
           </div>

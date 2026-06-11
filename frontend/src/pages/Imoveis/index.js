@@ -47,6 +47,7 @@ export default function Imoveis() {
   const [form, setForm] = useState(FORM_IMOVEL_INICIAL);
   const [editando, setEditando] = useState(null);
   const [salvando, setSalvando] = useState(false);
+  const [erros, setErros] = useState({});
   const [page, setPage] = useState(1);
   const [historicoModal, setHistoricoModal] = useState(null);
   const [historico, setHistorico] = useState([]);
@@ -105,9 +106,20 @@ export default function Imoveis() {
     return { total, ocupados, vagos, manutencao };
   }, [todosImoveis]);
 
+  // Sugere o próximo código no padrão IM### a partir dos imóveis já cadastrados.
+  const sugerirCodigo = () => {
+    let maior = 0;
+    todosImoveis.forEach((im) => {
+      const m = /(\d+)/.exec(im.codigo || '');
+      if (m) maior = Math.max(maior, parseInt(m[1], 10));
+    });
+    return `IM${String(maior + 1).padStart(3, '0')}`;
+  };
+
   const abrirNovo = () => {
     setEditando(null);
-    setForm(FORM_IMOVEL_INICIAL);
+    setErros({});
+    setForm({ ...FORM_IMOVEL_INICIAL, codigo: sugerirCodigo() });
     setFormInquilino(FORM_INQUILINO_INICIAL);
     setInquilinoVinculado(null);
     setAbaAtiva('dados');
@@ -142,6 +154,7 @@ export default function Imoveis() {
 
   const abrirEditar = (imovel) => {
     setEditando(imovel.id);
+    setErros({});
     setForm({
       codigo: imovel.codigo || '',
       tipo: imovel.tipo || 'apartamento',
@@ -161,16 +174,37 @@ export default function Imoveis() {
     setModalAberto(true);
   };
 
+  // Rótulos amigáveis dos campos (para mensagens e destaque)
+  const CAMPO_LABEL = {
+    codigo: 'Código', tipo: 'Tipo', endereco: 'Endereço',
+    valor_sem_desconto: 'Valor s/ Desconto', valor_com_desconto: 'Valor c/ Desconto',
+    dia_vencimento: 'Dia de Vencimento', status: 'Status'
+  };
+
+  const validarImovel = () => {
+    const e = {};
+    if (!form.codigo?.trim()) e.codigo = 'Informe o código';
+    if (!form.endereco?.trim() || form.endereco.trim().length < 5) e.endereco = 'Endereço deve ter ao menos 5 caracteres';
+    if (form.valor_sem_desconto === '' || form.valor_sem_desconto == null) e.valor_sem_desconto = 'Informe o valor';
+    if (!form.dia_vencimento) e.dia_vencimento = 'Informe o dia';
+    else if (form.dia_vencimento < 1 || form.dia_vencimento > 31) e.dia_vencimento = 'Dia entre 1 e 31';
+    if (
+      form.valor_com_desconto && form.valor_sem_desconto &&
+      parseFloat(form.valor_com_desconto) > parseFloat(form.valor_sem_desconto)
+    ) e.valor_com_desconto = 'Não pode ser maior que o valor sem desconto';
+    return e;
+  };
+
   const handleSalvar = async (e) => {
     e?.preventDefault();
-    if (
-      form.valor_com_desconto &&
-      form.valor_sem_desconto &&
-      parseFloat(form.valor_com_desconto) > parseFloat(form.valor_sem_desconto)
-    ) {
-      toast.error('O valor com desconto não pode ser maior que o valor sem desconto');
+    const errosCampos = validarImovel();
+    if (Object.keys(errosCampos).length > 0) {
+      setErros(errosCampos);
+      const nomes = Object.keys(errosCampos).map((k) => CAMPO_LABEL[k] || k).join(', ');
+      toast.error(`Verifique os campos destacados: ${nomes}`);
       return;
     }
+    setErros({});
     setSalvando(true);
     try {
       if (editando) {
@@ -184,7 +218,17 @@ export default function Imoveis() {
       fetchImoveis();
       fetchTodos();
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Erro ao salvar imóvel');
+      // Mapeia erros de validação do backend (express-validator) para os campos
+      const detalhes = err.response?.data?.detalhes;
+      if (Array.isArray(detalhes) && detalhes.length > 0) {
+        const mapa = {};
+        detalhes.forEach((d) => { if (d.path) mapa[d.path] = d.msg || 'Valor inválido'; });
+        setErros(mapa);
+        const nomes = Object.keys(mapa).map((k) => CAMPO_LABEL[k] || k).join(', ');
+        toast.error(`Verifique os campos destacados: ${nomes}`);
+      } else {
+        toast.error(err.response?.data?.error || 'Erro ao salvar imóvel');
+      }
     } finally {
       setSalvando(false);
     }
@@ -239,7 +283,10 @@ export default function Imoveis() {
     }
   };
 
-  const setF = (campo, valor) => setForm(prev => ({ ...prev, [campo]: valor }));
+  const setF = (campo, valor) => {
+    setForm(prev => ({ ...prev, [campo]: valor }));
+    setErros(prev => (prev[campo] ? { ...prev, [campo]: undefined } : prev));
+  };
   const setFI = (campo, valor) => setFormInquilino(prev => ({ ...prev, [campo]: valor }));
 
   const paginatedImoveis = imoveis.slice((page - 1) * PER_PAGE, page * PER_PAGE);
@@ -413,7 +460,8 @@ export default function Imoveis() {
             <div className="form-grid">
               <div className="form-group">
                 <label className="form-label">Código <span className="required">*</span></label>
-                <input className="form-control" value={f.codigo} onChange={(e) => setF('codigo', e.target.value)} required placeholder="Ex: IM001" />
+                <input className={`form-control ${erros.codigo ? 'is-invalid' : ''}`} value={f.codigo} onChange={(e) => setF('codigo', e.target.value)} required placeholder="Ex: IM001" />
+                {erros.codigo && <div className="form-error">{erros.codigo}</div>}
               </div>
               <div className="form-group">
                 <label className="form-label">Tipo <span className="required">*</span></label>
@@ -429,21 +477,25 @@ export default function Imoveis() {
 
             <div className="form-group">
               <label className="form-label">Endereço Completo <span className="required">*</span></label>
-              <input className="form-control" value={f.endereco} onChange={(e) => setF('endereco', e.target.value)} required placeholder="Rua, número, complemento, bairro, cidade" />
+              <input className={`form-control ${erros.endereco ? 'is-invalid' : ''}`} value={f.endereco} onChange={(e) => setF('endereco', e.target.value)} required placeholder="Rua, número, complemento, bairro, cidade" />
+              {erros.endereco && <div className="form-error">{erros.endereco}</div>}
             </div>
 
             <div className="form-grid-3">
               <div className="form-group">
                 <label className="form-label">Valor s/ Desconto <span className="required">*</span></label>
-                <MoneyInput value={f.valor_sem_desconto} onChange={(v) => setF('valor_sem_desconto', v)} required />
+                <MoneyInput className={`form-control ${erros.valor_sem_desconto ? 'is-invalid' : ''}`} value={f.valor_sem_desconto} onChange={(v) => setF('valor_sem_desconto', v)} required />
+                {erros.valor_sem_desconto && <div className="form-error">{erros.valor_sem_desconto}</div>}
               </div>
               <div className="form-group">
                 <label className="form-label">Valor c/ Desconto</label>
-                <MoneyInput value={f.valor_com_desconto} onChange={(v) => setF('valor_com_desconto', v)} />
+                <MoneyInput className={`form-control ${erros.valor_com_desconto ? 'is-invalid' : ''}`} value={f.valor_com_desconto} onChange={(v) => setF('valor_com_desconto', v)} />
+                {erros.valor_com_desconto && <div className="form-error">{erros.valor_com_desconto}</div>}
               </div>
               <div className="form-group">
                 <label className="form-label">Dia de Vencimento <span className="required">*</span></label>
-                <input className="form-control" type="number" min="1" max="31" value={f.dia_vencimento} onChange={(e) => setF('dia_vencimento', e.target.value)} required />
+                <input className={`form-control ${erros.dia_vencimento ? 'is-invalid' : ''}`} type="number" min="1" max="31" value={f.dia_vencimento} onChange={(e) => setF('dia_vencimento', e.target.value)} required />
+                {erros.dia_vencimento && <div className="form-error">{erros.dia_vencimento}</div>}
               </div>
             </div>
 
