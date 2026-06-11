@@ -545,6 +545,7 @@ tbody tr:last-child td { border-bottom: none; }
   display: flex;
   gap: 4px;
   align-items: center;
+  flex-wrap: nowrap;
 }
 
 /* ===== BADGES / STATUS ===== */
@@ -1040,6 +1041,9 @@ textarea.form-control { min-height: 80px; resize: vertical; }
 @media (max-width: 480px) {
   .stats-grid { grid-template-columns: 1fr; }
   .alerts-grid { grid-template-columns: 1fr; }
+
+  /* Aproveita melhor a tela: 2 cards de resumo por linha no celular */
+  .metrics-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
 
   .topbar-left .topbar-title { font-size: 15px; }
   .user-info { display: none; }
