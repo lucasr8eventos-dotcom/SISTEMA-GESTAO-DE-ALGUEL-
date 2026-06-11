@@ -160,7 +160,10 @@ export default function Inadimplencia() {
                 {/* Cabeçalho clicável */}
                 <div
                   onClick={() => toggle(k)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', cursor: 'pointer' }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', cursor: 'pointer',
+                    background: critico ? 'rgba(239, 68, 68, 0.05)' : undefined
+                  }}
                 >
                   <span style={{ color: 'var(--gray-400)' }}>
                     {aberto ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
