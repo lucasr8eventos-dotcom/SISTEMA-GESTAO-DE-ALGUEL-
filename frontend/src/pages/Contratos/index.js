@@ -57,6 +57,14 @@ export default function Contratos() {
   const [salvandoReajuste, setSalvandoReajuste] = useState(false);
   const [confirmExcluirReajuste, setConfirmExcluirReajuste] = useState(null);
 
+  // Ações rápidas: informar renovação / reajuste
+  const [renovarAlvo, setRenovarAlvo] = useState(null);
+  const [renovarAnos, setRenovarAnos] = useState(1);
+  const [renovarSalvando, setRenovarSalvando] = useState(false);
+  const [reajAlvo, setReajAlvo] = useState(null);
+  const [reajForm, setReajForm] = useState({ novo_valor: '', percentual: '', data: '' });
+  const [reajSalvando, setReajSalvando] = useState(false);
+
   const toast = useToast();
   const { isAdmin } = useAuth();
 
@@ -154,17 +162,59 @@ export default function Contratos() {
   const toggleExtra = (chave) => setFiltroExtra(filtroExtra === chave ? '' : chave);
   const toggleStatus = (s) => setFiltroStatus(filtroStatus === s ? '' : s);
 
-  // ===== Modal contrato =====
-  const abrirNovo = () => {
-    setEditando(null);
-    setForm(FORM_INICIAL);
-    setReajustesContrato([]);
-    setFormReajuste(FORM_REAJUSTE_INICIAL);
-    setEditandoReajuste(null);
-    setAbaAtiva('dados');
-    setModalAberto(true);
+  // ===== Ações rápidas: renovar / reajustar =====
+  const calcNovaDataFim = (dataFim, anos) => {
+    if (!dataFim) return '—';
+    const d = new Date(dataFim);
+    d.setFullYear(d.getFullYear() + (parseInt(anos, 10) || 1));
+    return d.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
   };
 
+  const abrirRenovar = (c) => { setRenovarAnos(1); setRenovarAlvo(c); };
+  const confirmarRenovar = async () => {
+    setRenovarSalvando(true);
+    try {
+      await contratosService.renovar(renovarAlvo.id, { anos: renovarAnos });
+      toast.success('Contrato renovado!');
+      setRenovarAlvo(null);
+      fetchContratos(); fetchTodos();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erro ao renovar contrato');
+    } finally {
+      setRenovarSalvando(false);
+    }
+  };
+
+  const abrirReajuste = (c) => {
+    setReajForm({ novo_valor: '', percentual: '', data: new Date().toISOString().split('T')[0] });
+    setReajAlvo(c);
+  };
+  const reajNovoValorCalc = () => {
+    if (!reajAlvo) return 0;
+    if (reajForm.novo_valor) return parseFloat(reajForm.novo_valor) || 0;
+    if (reajForm.percentual) return Number((parseFloat(reajAlvo.valor || 0) * (1 + parseFloat(reajForm.percentual) / 100)).toFixed(2));
+    return 0;
+  };
+  const confirmarReajuste = async () => {
+    if (!reajForm.novo_valor && !reajForm.percentual) { toast.error('Informe o novo valor ou o percentual'); return; }
+    setReajSalvando(true);
+    try {
+      await contratosService.reajustar(reajAlvo.id, {
+        novo_valor: reajForm.novo_valor || undefined,
+        percentual: reajForm.percentual || undefined,
+        data: reajForm.data || undefined
+      });
+      toast.success('Reajuste aplicado e registrado no histórico!');
+      setReajAlvo(null);
+      fetchContratos(); fetchTodos();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erro ao reajustar contrato');
+    } finally {
+      setReajSalvando(false);
+    }
+  };
+
+  // ===== Modal contrato (somente edição/visualização) =====
   const carregarReajustesContrato = async (contratoId) => {
     try {
       const res = await reajustesService.listar();
@@ -356,7 +406,9 @@ export default function Contratos() {
           <h1>Contratos</h1>
           <p>Controle contratos ativos, vencidos e próximos do vencimento.</p>
         </div>
-        <button className="btn btn-primary" onClick={abrirNovo}>+ Novo Contrato</button>
+        <span className="form-hint" style={{ maxWidth: 280, textAlign: 'right' }}>
+          Novos contratos são criados em <strong>Imóveis › Novo Imóvel</strong>. Aqui você acompanha e atualiza os existentes.
+        </span>
       </div>
 
       {/* Bloco 1 — Status dos Contratos */}
@@ -477,6 +529,12 @@ export default function Contratos() {
                       <td>{c.status === 'ativo' && getAlertaVencimento(c.dias_para_vencer)}</td>
                       <td onClick={(e) => e.stopPropagation()}>
                         <div className="table-actions">
+                          {c.status !== 'encerrado' && (
+                            <button className="btn btn-ghost btn-sm btn-icon" title="Informar renovação" onClick={() => abrirRenovar(c)}><CalendarClock size={14} color="var(--accent)" /></button>
+                          )}
+                          {c.status !== 'encerrado' && (
+                            <button className="btn btn-ghost btn-sm btn-icon" title="Informar reajuste" onClick={() => abrirReajuste(c)}><TrendingUp size={14} color="var(--success)" /></button>
+                          )}
                           {c.arquivo_pdf && (
                             <button
                               type="button"
@@ -485,7 +543,7 @@ export default function Contratos() {
                               onClick={() => verPdf(c.arquivo_pdf)}
                             ><Paperclip size={14} /></button>
                           )}
-                          <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => abrirEditar(c)}><Pencil size={14} /></button>
+                          <button className="btn btn-ghost btn-sm btn-icon" title="Editar / detalhes" onClick={() => abrirEditar(c)}><Pencil size={14} /></button>
                           {isAdmin && (
                             <button className="btn btn-outline-danger btn-sm btn-icon" title="Excluir" onClick={() => setConfirmExcluir(c)}><Trash2 size={14} /></button>
                           )}
@@ -747,6 +805,93 @@ export default function Contratos() {
         title="Excluir Reajuste"
         message={confirmExcluirReajuste ? `Excluir reajuste previsto para ${formatData(confirmExcluirReajuste.data_proximo)}?` : ''}
       />
+
+      {/* ===== Modal: informar renovação ===== */}
+      <Modal
+        isOpen={!!renovarAlvo}
+        onClose={() => setRenovarAlvo(null)}
+        title="Informar renovação do contrato"
+        footer={
+          <>
+            <button className="btn btn-ghost" onClick={() => setRenovarAlvo(null)}>Cancelar</button>
+            <button className="btn btn-primary" onClick={confirmarRenovar} disabled={renovarSalvando}>
+              {renovarSalvando ? 'Renovando...' : 'Confirmar renovação'}
+            </button>
+          </>
+        }
+      >
+        {renovarAlvo && (
+          <>
+            <div style={{ background: 'var(--gray-50)', borderRadius: 'var(--radius)', padding: 14, marginBottom: 16, fontSize: 13 }}>
+              <div><span style={{ color: 'var(--gray-500)' }}>Contrato:</span> <strong>{renovarAlvo.imovel_codigo}</strong> · {renovarAlvo.inquilino_nome}</div>
+              <div><span style={{ color: 'var(--gray-500)' }}>Vigência atual:</span> {formatData(renovarAlvo.data_inicio)} — {formatData(renovarAlvo.data_fim)}</div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Renovar por (anos)</label>
+              <select className="form-control" value={renovarAnos} onChange={(e) => setRenovarAnos(e.target.value)}>
+                {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n} ano(s)</option>)}
+              </select>
+            </div>
+            <div style={{ fontSize: 14 }}>
+              <span style={{ color: 'var(--gray-500)' }}>Nova data de término: </span>
+              <strong style={{ color: 'var(--accent)' }}>{calcNovaDataFim(renovarAlvo.data_fim, renovarAnos)}</strong>
+            </div>
+            <div className="form-hint" style={{ marginTop: 6 }}>O contrato continuará ativo com a nova vigência.</div>
+          </>
+        )}
+      </Modal>
+
+      {/* ===== Modal: informar reajuste ===== */}
+      <Modal
+        isOpen={!!reajAlvo}
+        onClose={() => setReajAlvo(null)}
+        title="Informar reajuste do aluguel"
+        footer={
+          <>
+            <button className="btn btn-ghost" onClick={() => setReajAlvo(null)}>Cancelar</button>
+            <button className="btn btn-primary" onClick={confirmarReajuste} disabled={reajSalvando}>
+              {reajSalvando ? 'Aplicando...' : 'Aplicar reajuste'}
+            </button>
+          </>
+        }
+      >
+        {reajAlvo && (
+          <>
+            <div style={{ background: 'var(--gray-50)', borderRadius: 'var(--radius)', padding: 14, marginBottom: 16, fontSize: 13 }}>
+              <div><span style={{ color: 'var(--gray-500)' }}>Contrato:</span> <strong>{reajAlvo.imovel_codigo}</strong> · {reajAlvo.inquilino_nome}</div>
+              <div><span style={{ color: 'var(--gray-500)' }}>Valor atual:</span> <strong>{formatMoeda(reajAlvo.valor)}</strong></div>
+            </div>
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">Percentual (%)</label>
+                <input
+                  className="form-control" type="number" step="0.01" min="0" placeholder="ex.: 10"
+                  value={reajForm.percentual}
+                  onChange={(e) => setReajForm((p) => ({ ...p, percentual: e.target.value, novo_valor: '' }))}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Novo valor (R$)</label>
+                <MoneyInput
+                  value={reajForm.novo_valor}
+                  onChange={(v) => setReajForm((p) => ({ ...p, novo_valor: v, percentual: '' }))}
+                />
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Data do reajuste</label>
+              <input className="form-control" type="date" value={reajForm.data} onChange={(e) => setReajForm((p) => ({ ...p, data: e.target.value }))} />
+            </div>
+            <div style={{ borderTop: '1px solid var(--gray-200)', paddingTop: 12, fontSize: 14 }}>
+              <span style={{ color: 'var(--gray-500)' }}>Novo aluguel: </span>
+              <strong style={{ color: 'var(--success)' }}>{formatMoeda(reajNovoValorCalc())}</strong>
+            </div>
+            <div className="form-hint" style={{ marginTop: 6 }}>
+              O valor do contrato será atualizado e o reajuste ficará registrado no histórico (aba Reajustes).
+            </div>
+          </>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -67,6 +67,8 @@ export const contratosService = {
   buscarPorId: (id) => api.get(`/contratos/${id}`),
   criar: (dados) => api.post('/contratos', dados, { headers: { 'Content-Type': 'multipart/form-data' } }),
   atualizar: (id, dados) => api.put(`/contratos/${id}`, dados, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  renovar: (id, dados) => api.post(`/contratos/${id}/renovar`, dados),
+  reajustar: (id, dados) => api.post(`/contratos/${id}/reajustar`, dados),
   excluir: (id) => api.delete(`/contratos/${id}`),
   // A rota /uploads é protegida por JWT — precisa ir via axios (com header Authorization),
   // não dá para abrir direto num <a href>, que não envia o token.
@@ -79,6 +81,8 @@ export const pagamentosService = {
   criar: (dados) => api.post('/pagamentos', dados),
   gerarParcelas: (mes, ano) => api.post('/pagamentos/gerar-parcelas', { mes, ano }),
   atualizar: (id, dados) => api.put(`/pagamentos/${id}`, dados),
+  pagar: (id, dados) => api.post(`/pagamentos/${id}/pagar`, dados),
+  reabrir: (id) => api.post(`/pagamentos/${id}/reabrir`),
   excluir: (id) => api.delete(`/pagamentos/${id}`),
   recibo: (id) => api.get(`/pagamentos/${id}/recibo`, { responseType: 'blob' }),
   reciboPremium: (id, params) => api.get(`/pagamentos/${id}/recibo-premium`, { params, responseType: 'blob' }),
@@ -158,7 +162,8 @@ export const relatoriosService = {
   contratosVencendo: (params) => api.get('/relatorios/contratos-vencendo', { params }),
   despesas: (params) => api.get('/relatorios/despesas', { params }),
   exportarExcel: (params) => api.get('/relatorios/exportar/excel', { params, responseType: 'blob' }),
-  exportarPdf: (params) => api.get('/relatorios/exportar/pdf', { params, responseType: 'blob' })
+  exportarPdf: (params) => api.get('/relatorios/exportar/pdf', { params, responseType: 'blob' }),
+  fichasImoveisLista: () => api.get('/relatorios/imoveis/fichas-lista/pdf', { responseType: 'blob' })
 };
 
 export const downloadBlob = (blob, filename) => {

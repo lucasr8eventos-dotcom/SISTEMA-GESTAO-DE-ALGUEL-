@@ -81,6 +81,9 @@ CREATE TABLE IF NOT EXISTS pagamentos (
     valor_recebido DECIMAL(10,2),
     forma_pagamento VARCHAR(50) CHECK (forma_pagamento IN ('dinheiro', 'pix', 'transferencia', 'boleto', 'cartao')),
     status VARCHAR(50) NOT NULL DEFAULT 'pendente' CHECK (status IN ('pago', 'pendente', 'atrasado', 'parcial')),
+    juros DECIMAL(10,2) DEFAULT 0,
+    multa DECIMAL(10,2) DEFAULT 0,
+    desconto DECIMAL(10,2) DEFAULT 0,
     observacoes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

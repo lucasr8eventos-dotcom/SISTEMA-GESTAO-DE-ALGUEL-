@@ -13,7 +13,20 @@ export default function Relatorios() {
   const [loading, setLoading] = useState(false);
   const [exportando, setExportando] = useState(false);
   const [buscou, setBuscou] = useState(false);
+  const [fichasGerando, setFichasGerando] = useState(false);
   const toast = useToast();
+
+  const emitirFichasLista = async () => {
+    setFichasGerando(true);
+    try {
+      const res = await relatoriosService.fichasImoveisLista();
+      downloadBlob(res.data, `fichas-imoveis-lista-${new Date().toISOString().split('T')[0]}.pdf`);
+    } catch {
+      toast.error('Erro ao gerar a lista de fichas dos imóveis');
+    } finally {
+      setFichasGerando(false);
+    }
+  };
 
   const buscarRelatorio = async () => {
     setLoading(true);
@@ -202,6 +215,9 @@ export default function Relatorios() {
           <h1>Relatórios</h1>
           <p>Gere relatórios financeiros, cadastrais e operacionais do sistema.</p>
         </div>
+        <button className="btn btn-primary" onClick={emitirFichasLista} disabled={fichasGerando}>
+          {fichasGerando ? 'Gerando...' : 'Fichas dos Imóveis (lista)'}
+        </button>
       </div>
 
       <div className="card" style={{ marginBottom: 20 }}>

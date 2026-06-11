@@ -62,6 +62,7 @@ export default function App() {
             <Route path="/contratos" element={<PrivateRoute><Contratos /></PrivateRoute>} />
             <Route path="/pagamentos" element={<PrivateRoute><Pagamentos /></PrivateRoute>} />
             <Route path="/despesas" element={<PrivateRoute><Despesas /></PrivateRoute>} />
+            <Route path="/contas-a-pagar" element={<PrivateRoute><Despesas /></PrivateRoute>} />
             <Route path="/recibos" element={<PrivateRoute><Recibos /></PrivateRoute>} />
             <Route path="/inadimplencia" element={<PrivateRoute><Inadimplencia /></PrivateRoute>} />
             <Route path="/relatorios" element={<PrivateRoute><Relatorios /></PrivateRoute>} />

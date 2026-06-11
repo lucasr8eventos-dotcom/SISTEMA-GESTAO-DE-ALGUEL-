@@ -18,7 +18,7 @@ const ETAPAS = ['Imóvel', 'Inquilino', 'Contrato', 'Revisão'];
 
 // Wizard de cadastro completo: Imóvel → Inquilino → Contrato → Revisão.
 // Usa os endpoints já existentes (imóveis, inquilinos, contratos), vinculando-os.
-export default function CadastroCompleto({ isOpen, onClose, onDone, toast }) {
+export default function CadastroCompleto({ isOpen, onClose, onDone, toast, codigoSugerido }) {
   const [step, setStep] = useState(1);
   const [vincular, setVincular] = useState(true); // cadastrar inquilino+contrato junto?
   const [imovel, setImovel] = useState(IMOVEL_INI);
@@ -29,9 +29,11 @@ export default function CadastroCompleto({ isOpen, onClose, onDone, toast }) {
   useEffect(() => {
     if (isOpen) {
       setStep(1); setVincular(true);
-      setImovel(IMOVEL_INI); setInquilino(INQUILINO_INI); setContrato(CONTRATO_INI);
+      // Já sugere o próximo código (IM###), mas continua editável
+      setImovel({ ...IMOVEL_INI, codigo: codigoSugerido || '' });
+      setInquilino(INQUILINO_INI); setContrato(CONTRATO_INI);
     }
-  }, [isOpen]);
+  }, [isOpen, codigoSugerido]);
 
   const setI = (c, v) => setImovel((p) => ({ ...p, [c]: v }));
   const setQ = (c, v) => setInquilino((p) => ({ ...p, [c]: v }));

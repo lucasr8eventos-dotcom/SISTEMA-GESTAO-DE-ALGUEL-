@@ -13,12 +13,33 @@ import SearchInput from '../../components/filters/SearchInput';
 import MetricCard from '../../components/MetricCard';
 import { EmptyState, EmptyFiltered, ErrorState } from '../../components/StateViews';
 import { formatMoeda, formatData, getMesAtual, getAnoAtual, MESES, formaPagamentoLabel } from '../../utils/format';
-import { Pencil, Trash2, FileText, Banknote, RefreshCw } from 'lucide-react';
+import { Pencil, Trash2, FileText, Banknote, RefreshCw, CheckCircle2, RotateCcw } from 'lucide-react';
+
+const hojeISO = () => new Date().toISOString().split('T')[0];
 
 const FORM_INICIAL = {
   mes: getMesAtual(), ano: getAnoAtual(), imovel_id: '', contrato_id: '',
   valor_aluguel: '', data_vencimento: '', data_pagamento: '', valor_recebido: '',
   forma_pagamento: '', status: 'pendente', observacoes: ''
+};
+
+const PAG_INICIAL = {
+  data_pagamento: hojeISO(), forma_pagamento: 'pix',
+  valor_recebido: '', juros: '', multa: '', desconto: ''
+};
+
+const FORMAS_PAG = [
+  { value: 'pix', label: 'PIX' },
+  { value: 'dinheiro', label: 'Dinheiro' },
+  { value: 'transferencia', label: 'Transferência' },
+  { value: 'boleto', label: 'Boleto' },
+  { value: 'cartao', label: 'Cartão' }
+];
+
+// valor que ainda falta receber numa parcela (considerando encargos já lançados)
+const faltaReceber = (p) => {
+  const devido = parseFloat(p.valor_aluguel || 0) + parseFloat(p.juros || 0) + parseFloat(p.multa || 0) - parseFloat(p.desconto || 0);
+  return Math.max(0, devido - parseFloat(p.valor_recebido || 0));
 };
 
 const STATUS_OPTIONS = [
@@ -48,6 +69,8 @@ export default function Pagamentos() {
   const [filtroStatus, setFiltroStatus] = useState('');
   const [filtroInquilino, setFiltroInquilino] = useState('');
   const [busca, setBusca] = useState('');
+  const [filtroDataInicio, setFiltroDataInicio] = useState('');
+  const [filtroDataFim, setFiltroDataFim] = useState('');
   const [modalAberto, setModalAberto] = useState(false);
   const [confirmExcluir, setConfirmExcluir] = useState(null);
   const [form, setForm] = useState(FORM_INICIAL);
@@ -63,6 +86,10 @@ export default function Pagamentos() {
   const [reciboGerando, setReciboGerando] = useState(false);
   const [novoRecAberto, setNovoRecAberto] = useState(false);
   const [novoRec, setNovoRec] = useState({ nome: '', documento: '' });
+  // Modal "Informar pagamento" (dar baixa)
+  const [pagAlvo, setPagAlvo] = useState(null);
+  const [pagForm, setPagForm] = useState(PAG_INICIAL);
+  const [pagSalvando, setPagSalvando] = useState(false);
   const toast = useToast();
   const { isAdmin } = useAuth();
   const location = useLocation();
@@ -77,15 +104,22 @@ export default function Pagamentos() {
     if (ano) setFiltroAno(ano);
   }, [location.search]);
 
+  // Quando há intervalo de datas, ele substitui o filtro de mês/ano.
+  const usandoIntervalo = !!(filtroDataInicio || filtroDataFim);
+
+  // Busca SEMPRE o conjunto completo do período (mês/ano ou intervalo), SEM
+  // aplicar status/busca/inquilino — esses filtros são client-side e afetam só
+  // a tabela. Assim os cards de resumo refletem sempre o total geral do período.
   const fetchPagamentos = useCallback(async () => {
     setLoading(true);
     setErro(null);
+    const comIntervalo = !!(filtroDataInicio || filtroDataFim);
     try {
       const res = await pagamentosService.listar({
-        mes: filtroMes || undefined,
-        ano: filtroAno || undefined,
-        status: filtroStatus || undefined,
-        busca: busca || undefined
+        mes: comIntervalo ? undefined : (filtroMes || undefined),
+        ano: comIntervalo ? undefined : (filtroAno || undefined),
+        data_inicio: filtroDataInicio || undefined,
+        data_fim: filtroDataFim || undefined
       });
       setPagamentos(res.data);
     } catch (err) {
@@ -93,10 +127,12 @@ export default function Pagamentos() {
     } finally {
       setLoading(false);
     }
-  }, [filtroMes, filtroAno, filtroStatus, busca]);
+  }, [filtroMes, filtroAno, filtroDataInicio, filtroDataFim]);
 
   // Pagamentos do mês anterior pra comparativo (sem afetar exibição)
   const fetchPagamentosAnterior = useCallback(async () => {
+    // Comparativo não faz sentido com intervalo de datas custom
+    if (filtroDataInicio || filtroDataFim) { setPagamentosAnterior([]); return; }
     if (!filtroMes || !filtroAno) { setPagamentosAnterior([]); return; }
     const m = parseInt(filtroMes);
     const a = parseInt(filtroAno);
@@ -108,7 +144,7 @@ export default function Pagamentos() {
     } catch {
       setPagamentosAnterior([]);
     }
-  }, [filtroMes, filtroAno]);
+  }, [filtroMes, filtroAno, filtroDataInicio, filtroDataFim]);
 
   useEffect(() => {
     const t = setTimeout(fetchPagamentos, 300);
@@ -120,7 +156,7 @@ export default function Pagamentos() {
     return () => clearTimeout(t);
   }, [fetchPagamentosAnterior]);
 
-  useEffect(() => { setPage(1); }, [filtroMes, filtroAno, filtroStatus, filtroInquilino, busca]);
+  useEffect(() => { setPage(1); }, [filtroMes, filtroAno, filtroStatus, filtroInquilino, busca, filtroDataInicio, filtroDataFim]);
 
   useEffect(() => {
     Promise.all([
@@ -186,6 +222,60 @@ export default function Pagamentos() {
       fetchPagamentos();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Erro ao excluir');
+    }
+  };
+
+  // ===== Informar pagamento (dar baixa) =====
+  const setPF = (campo, valor) => setPagForm((prev) => ({ ...prev, [campo]: valor }));
+
+  const abrirPagamento = (p) => {
+    setPagAlvo(p);
+    const falta = faltaReceber(p);
+    setPagForm({
+      ...PAG_INICIAL,
+      data_pagamento: hojeISO(),
+      forma_pagamento: p.forma_pagamento || 'pix',
+      // pré-preenche com o que ainda falta receber
+      valor_recebido: falta > 0 ? falta.toFixed(2) : parseFloat(p.valor_aluguel || 0).toFixed(2)
+    });
+  };
+
+  const pagJaRecebido = pagAlvo ? parseFloat(pagAlvo.valor_recebido || 0) : 0;
+  const pagTotalDevido = pagAlvo
+    ? (parseFloat(pagAlvo.valor_aluguel || 0) + (parseFloat(pagForm.juros) || 0) + (parseFloat(pagForm.multa) || 0) - (parseFloat(pagForm.desconto) || 0))
+    : 0;
+  const pagValorRecebido = parseFloat(pagForm.valor_recebido) || 0;
+  const pagSaldo = pagTotalDevido - pagJaRecebido - pagValorRecebido;
+
+  const handleConfirmarPagamento = async () => {
+    if (!pagValorRecebido || pagValorRecebido <= 0) { toast.error('Informe o valor recebido'); return; }
+    setPagSalvando(true);
+    try {
+      await pagamentosService.pagar(pagAlvo.id, {
+        data_pagamento: pagForm.data_pagamento,
+        valor_recebido: pagValorRecebido,
+        forma_pagamento: pagForm.forma_pagamento || undefined,
+        juros: parseFloat(pagForm.juros) || 0,
+        multa: parseFloat(pagForm.multa) || 0,
+        desconto: parseFloat(pagForm.desconto) || 0
+      });
+      toast.success(pagSaldo > 0.005 ? 'Pagamento parcial registrado!' : 'Pagamento registrado — parcela quitada!');
+      setPagAlvo(null);
+      fetchPagamentos();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erro ao informar pagamento');
+    } finally {
+      setPagSalvando(false);
+    }
+  };
+
+  const handleReabrir = async (p) => {
+    try {
+      await pagamentosService.reabrir(p.id);
+      toast.success('Pagamento reaberto (baixa estornada).');
+      fetchPagamentos();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erro ao reabrir');
     }
   };
 
@@ -319,33 +409,42 @@ export default function Pagamentos() {
     return next;
   });
 
-  // ===== Filtro por inquilino (cliente) =====
-  // Usa o inquilino_id que o backend já devolve via JOIN do contrato — assim
-  // funciona também para pagamentos de contratos vencidos/encerrados (que não
-  // estão na lista de contratos ativos carregada para o formulário).
-  const pagamentosFiltrados = useMemo(() => {
-    if (!filtroInquilino) return pagamentos;
-    return pagamentos.filter((p) => String(p.inquilino_id) === String(filtroInquilino));
-  }, [pagamentos, filtroInquilino]);
-
-  // ===== Stats =====
-  const stats = useMemo(() => {
+  // Resume uma lista de pagamentos (usado para os cards do mês e para o
+  // "Resumo do filtro aplicado").
+  const resumir = (lista) => {
     const counts = { pago: 0, pendente: 0, atrasado: 0, parcial: 0 };
     let totalReceber = 0, totalRecebido = 0;
-    pagamentosFiltrados.forEach((p) => {
+    lista.forEach((p) => {
       counts[p.status] = (counts[p.status] || 0) + 1;
       totalReceber += parseFloat(p.valor_aluguel || 0);
       if (p.status === 'pago') totalRecebido += parseFloat(p.valor_recebido || p.valor_aluguel || 0);
       else if (p.status === 'parcial') totalRecebido += parseFloat(p.valor_recebido || 0);
     });
-    const totalParcial = pagamentosFiltrados
-      .filter((p) => p.status === 'parcial')
-      .reduce((s, p) => s + parseFloat(p.valor_aluguel || 0), 0);
-    const pagoParcial = pagamentosFiltrados
-      .filter((p) => p.status === 'parcial')
-      .reduce((s, p) => s + parseFloat(p.valor_recebido || 0), 0);
+    const totalParcial = lista.filter((p) => p.status === 'parcial').reduce((s, p) => s + parseFloat(p.valor_aluguel || 0), 0);
+    const pagoParcial = lista.filter((p) => p.status === 'parcial').reduce((s, p) => s + parseFloat(p.valor_recebido || 0), 0);
     return { counts, totalReceber, totalRecebido, totalParcial, pagoParcial };
-  }, [pagamentosFiltrados]);
+  };
+
+  // ===== Filtros client-side (afetam SOMENTE a tabela) =====
+  // status + inquilino + busca. Os cards usam o conjunto completo do período.
+  const pagamentosFiltrados = useMemo(() => {
+    const t = busca.trim().toLowerCase();
+    return pagamentos.filter((p) => {
+      if (filtroStatus && p.status !== filtroStatus) return false;
+      if (filtroInquilino && String(p.inquilino_id) !== String(filtroInquilino)) return false;
+      if (t) {
+        const alvo = `${p.imovel_codigo || ''} ${p.imovel_endereco || ''} ${p.inquilino_nome || ''}`.toLowerCase();
+        if (!alvo.includes(t)) return false;
+      }
+      return true;
+    });
+  }, [pagamentos, filtroStatus, filtroInquilino, busca]);
+
+  // ===== Stats do PERÍODO (cards) — sempre o total geral, ignora filtros =====
+  const stats = useMemo(() => resumir(pagamentos), [pagamentos]);
+
+  // ===== Stats do FILTRO aplicado (área separada) =====
+  const statsFiltro = useMemo(() => resumir(pagamentosFiltrados), [pagamentosFiltrados]);
 
   // ===== Comparativo com mês anterior =====
   const variacoes = useMemo(() => {
@@ -376,7 +475,7 @@ export default function Pagamentos() {
   };
 
   const hasFiltrosAtivos =
-    !!filtroStatus || !!filtroInquilino || !!busca ||
+    !!filtroStatus || !!filtroInquilino || !!busca || !!filtroDataInicio || !!filtroDataFim ||
     !!(filtroMes && filtroAno && (filtroMes !== getMesAtual() || filtroAno !== getAnoAtual()));
 
   const limparFiltros = () => {
@@ -385,6 +484,8 @@ export default function Pagamentos() {
     setFiltroStatus('');
     setFiltroInquilino('');
     setBusca('');
+    setFiltroDataInicio('');
+    setFiltroDataFim('');
   };
 
   const hasDadosCadastrados = pagamentos.length > 0 || !!filtroStatus || !!busca; // heurística: se NÃO tem nada no mês atual sem filtros, pode ser que não tem cadastrados
@@ -470,6 +571,15 @@ export default function Pagamentos() {
           ano={filtroAno}
           onChange={({ mes, ano }) => { setFiltroMes(mes); setFiltroAno(ano); }}
         />
+        <div className="filter-field">
+          <label className="filter-label">Vencimento — intervalo</label>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input type="date" className="form-control" value={filtroDataInicio} onChange={(e) => setFiltroDataInicio(e.target.value)} title="Data inicial" />
+            <span style={{ color: 'var(--gray-400)' }}>até</span>
+            <input type="date" className="form-control" value={filtroDataFim} onChange={(e) => setFiltroDataFim(e.target.value)} title="Data final" />
+          </div>
+          {usandoIntervalo && <div className="form-hint">Usando intervalo — o filtro de mês/ano fica ignorado.</div>}
+        </div>
         <SearchInput
           value={busca}
           onChange={setBusca}
@@ -493,6 +603,23 @@ export default function Pagamentos() {
           />
         </div>
       </FilterBar>
+
+      {/* Resumo do filtro aplicado — separado do resumo geral do mês (cards) */}
+      {(filtroStatus || filtroInquilino || busca) && pagamentosFiltrados.length > 0 && (
+        <div className="card" style={{ marginBottom: 16, padding: '12px 16px' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-600)', marginBottom: 8 }}>
+            Resumo do filtro aplicado
+            <span style={{ fontWeight: 400, color: 'var(--gray-500)' }}> · {pagamentosFiltrados.length} item(ns)</span>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, fontSize: 14 }}>
+            <div><span style={{ color: 'var(--gray-500)' }}>Total: </span><strong>{formatMoeda(statsFiltro.totalReceber)}</strong></div>
+            <div><span style={{ color: 'var(--gray-500)' }}>Recebido: </span><strong style={{ color: 'var(--success)' }}>{formatMoeda(statsFiltro.totalRecebido)}</strong></div>
+            <div><span style={{ color: 'var(--gray-500)' }}>Em aberto: </span><strong style={{ color: 'var(--danger)' }}>{formatMoeda(statsFiltro.totalReceber - statsFiltro.totalRecebido)}</strong></div>
+            <div><span style={{ color: 'var(--gray-500)' }}>Atrasados: </span><strong style={{ color: 'var(--danger)' }}>{statsFiltro.counts.atrasado}</strong></div>
+          </div>
+          <div className="form-hint" style={{ marginTop: 6 }}>Os cards acima mostram sempre o total geral do período.</div>
+        </div>
+      )}
 
       {/* Erro */}
       {erro && <ErrorState message={erro} onRetry={fetchPagamentos} />}
@@ -560,6 +687,12 @@ export default function Pagamentos() {
                     </td>
                     <td>
                       <div className="table-actions">
+                        {p.status !== 'pago' && (
+                          <button className="btn btn-success btn-sm btn-icon" title="Informar pagamento" onClick={() => abrirPagamento(p)}><CheckCircle2 size={14} /></button>
+                        )}
+                        {(p.status === 'pago' || p.status === 'parcial') && (
+                          <button className="btn btn-ghost btn-sm btn-icon" title="Reabrir / estornar baixa" onClick={() => handleReabrir(p)}><RotateCcw size={14} /></button>
+                        )}
                         {(p.status === 'pago' || p.status === 'parcial') && (
                           <button className="btn btn-ghost btn-sm btn-icon" title="Gerar Recibo" onClick={() => abrirRecibo(p)}><FileText size={14} /></button>
                         )}
@@ -745,6 +878,95 @@ export default function Pagamentos() {
                 Incluir canhoto destacável
               </label>
             </div>
+          </>
+        )}
+      </Modal>
+
+      {/* ===== Modal informar pagamento (dar baixa) ===== */}
+      <Modal
+        isOpen={!!pagAlvo}
+        onClose={() => setPagAlvo(null)}
+        title="Informar pagamento"
+        size="lg"
+        footer={
+          <>
+            <button className="btn btn-ghost" onClick={() => setPagAlvo(null)}>Cancelar</button>
+            <button className="btn btn-success" onClick={handleConfirmarPagamento} disabled={pagSalvando}>
+              {pagSalvando ? 'Confirmando...' : 'Confirmar pagamento'}
+            </button>
+          </>
+        }
+      >
+        {pagAlvo && (
+          <>
+            {/* Resumo da parcela */}
+            <div style={{ background: 'var(--gray-50)', borderRadius: 'var(--radius)', padding: 14, marginBottom: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 13 }}>
+                <div><span style={{ color: 'var(--gray-500)' }}>Inquilino:</span> <strong>{pagAlvo.inquilino_nome || '—'}</strong></div>
+                <div><span style={{ color: 'var(--gray-500)' }}>Imóvel:</span> {pagAlvo.imovel_codigo}</div>
+                <div><span style={{ color: 'var(--gray-500)' }}>Referência:</span> {MESES[pagAlvo.mes - 1]}/{pagAlvo.ano}</div>
+                <div><span style={{ color: 'var(--gray-500)' }}>Vencimento:</span> {formatData(pagAlvo.data_vencimento)}</div>
+                <div><span style={{ color: 'var(--gray-500)' }}>Valor do aluguel:</span> <strong>{formatMoeda(pagAlvo.valor_aluguel)}</strong></div>
+                {pagJaRecebido > 0 && (
+                  <div><span style={{ color: 'var(--gray-500)' }}>Já recebido antes:</span> <strong style={{ color: 'var(--info)' }}>{formatMoeda(pagJaRecebido)}</strong></div>
+                )}
+              </div>
+              <div className="form-hint" style={{ marginTop: 8 }}>
+                Você pode registrar pagamento total ou parcial. O valor restante fica em aberto.
+              </div>
+            </div>
+
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">Data do pagamento <span className="required">*</span></label>
+                <input className="form-control" type="date" value={pagForm.data_pagamento} onChange={(e) => setPF('data_pagamento', e.target.value)} required />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Forma de pagamento</label>
+                <select className="form-control" value={pagForm.forma_pagamento} onChange={(e) => setPF('forma_pagamento', e.target.value)}>
+                  {FORMAS_PAG.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">Valor recebido <span className="required">*</span></label>
+                <MoneyInput value={pagForm.valor_recebido} onChange={(v) => setPF('valor_recebido', v)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Desconto</label>
+                <MoneyInput value={pagForm.desconto} onChange={(v) => setPF('desconto', v)} />
+              </div>
+            </div>
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">Juros</label>
+                <MoneyInput value={pagForm.juros} onChange={(v) => setPF('juros', v)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Multa</label>
+                <MoneyInput value={pagForm.multa} onChange={(v) => setPF('multa', v)} />
+              </div>
+            </div>
+
+            {/* Totais */}
+            <div style={{ borderTop: '1px solid var(--gray-200)', marginTop: 8, paddingTop: 12, display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
+              <div>
+                <div style={{ color: 'var(--gray-500)' }}>Total a receber (c/ encargos)</div>
+                <strong>{formatMoeda(pagTotalDevido)}</strong>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ color: 'var(--gray-500)' }}>{pagSaldo > 0.005 ? 'Ficará em aberto' : 'Saldo'}</div>
+                <strong style={{ color: pagSaldo > 0.005 ? 'var(--warning)' : 'var(--success)' }}>
+                  {formatMoeda(Math.max(0, pagSaldo))}
+                </strong>
+              </div>
+            </div>
+            {pagSaldo > 0.005 && (
+              <div className="form-hint" style={{ marginTop: 6 }}>
+                Pagamento <strong>parcial</strong>: a parcela ficará como "Parcial" e o restante continua em aberto.
+              </div>
+            )}
           </>
         )}
       </Modal>
