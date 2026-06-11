@@ -5,6 +5,7 @@ import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Modal, { ConfirmDialog } from '../../components/Modal';
 import Tabs from '../../components/Tabs';
+import CadastroCompleto from './CadastroCompleto';
 import { MoneyInput, CpfCnpjInput, PhoneInput } from '../../components/MaskedInput';
 import { maskCpfCnpj, maskPhone } from '../../utils/masks';
 import { formatMoeda, formatData, statusImovel, tipoImovel } from '../../utils/format';
@@ -50,6 +51,7 @@ export default function Imoveis() {
   const [historicoModal, setHistoricoModal] = useState(null);
   const [historico, setHistorico] = useState([]);
   const [abaAtiva, setAbaAtiva] = useState('dados');
+  const [cadastroCompleto, setCadastroCompleto] = useState(false);
 
   // Aba Inquilino
   const [formInquilino, setFormInquilino] = useState(FORM_INQUILINO_INICIAL);
@@ -251,7 +253,10 @@ export default function Imoveis() {
           <h1>Imóveis</h1>
           <p>Gerencie os imóveis cadastrados, status de locação e dados principais.</p>
         </div>
-        <button className="btn btn-primary" onClick={abrirNovo}>+ Novo Imóvel</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-ghost" onClick={() => setCadastroCompleto(true)}>Cadastro completo</button>
+          <button className="btn btn-primary" onClick={abrirNovo}>+ Novo Imóvel</button>
+        </div>
       </div>
 
       <div className="stats-grid stats-grid-4" style={{ marginBottom: 20 }}>
@@ -563,6 +568,13 @@ export default function Imoveis() {
         onConfirm={handleExcluir}
         title="Excluir Imóvel"
         message={`Tem certeza que deseja excluir o imóvel "${confirmExcluir?.codigo}"? Esta ação não pode ser desfeita.`}
+      />
+
+      <CadastroCompleto
+        isOpen={cadastroCompleto}
+        onClose={() => setCadastroCompleto(false)}
+        onDone={fetchImoveis}
+        toast={toast}
       />
     </div>
   );
