@@ -1,38 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell
+} from 'recharts';
 import { dashboardService } from '../../services/api';
 import { formatMoeda, MESES } from '../../utils/format';
-import { Building2, CheckCircle2, KeyRound, DollarSign, Banknote, AlertCircle, AlertTriangle, Receipt, FileText, TrendingUp } from 'lucide-react';
+import {
+  Home, PieChart as PieIcon, Wallet, AlertTriangle, Clock, TrendingUp, CalendarClock,
+  DollarSign, ArrowDownCircle, CheckCircle2, ArrowUpCircle, CreditCard, Building2,
+  FileText, Calendar, AlertCircle
+} from 'lucide-react';
 
-const StatCard = ({ icon, value, label, color, onClick }) => (
-  <div className="stat-card" onClick={onClick} style={{ cursor: onClick ? 'pointer' : 'default' }}>
-    <div className="stat-icon" style={{ background: `color-mix(in srgb, ${color} 15%, transparent)`, color }}>
+// Card de métrica do topo (ícone em círculo + rótulo + valor)
+const DashStat = ({ icon, label, value, color, valueColor, onClick }) => (
+  <div className="dash-stat" onClick={onClick} style={{ cursor: onClick ? 'pointer' : 'default' }}>
+    <div className="dash-stat-icon" style={{ background: `color-mix(in srgb, ${color} 14%, transparent)`, color }}>
       {icon}
     </div>
-    <div className="stat-info">
-      <div className="stat-value">{value}</div>
-      <div className="stat-label">{label}</div>
+    <div className="dash-stat-text">
+      <div className="dash-stat-label">{label}</div>
+      <div className="dash-stat-value" style={{ color: valueColor || 'var(--gray-800)' }}>{value}</div>
     </div>
   </div>
 );
 
-const AlertCard = ({ icon, title, value, description, color, onClick }) => (
-  <div
-    className="card"
-    style={{ cursor: onClick ? 'pointer' : 'default', borderLeft: `4px solid ${color}` }}
-    onClick={onClick}
-  >
-    <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-      <div style={{ color, display: 'flex', alignItems: 'center' }}>{icon}</div>
-      <div>
-        <div style={{ fontSize: 20, fontWeight: 700, color }}>{value}</div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--gray-700)' }}>{title}</div>
-        <div style={{ fontSize: 13, color: 'var(--gray-500)' }}>{description}</div>
-      </div>
-    </div>
-  </div>
-);
+// Cores da rosca / legenda de distribuição
+const RADIAN = Math.PI / 180;
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
@@ -85,210 +79,230 @@ export default function Dashboard() {
 
   if (!stats) return null;
 
-  const mesAtual = MESES[new Date().getMonth()];
-  const anoAtual = new Date().getFullYear();
+  const taxaOcupacao = stats.totalImoveis > 0
+    ? Math.round((stats.imoveisAlugados / stats.totalImoveis) * 100)
+    : 0;
+  const saldoPrevisto = parseFloat(stats.totalRecebido || 0) - parseFloat(stats.despesasMes || 0);
+
+  const plural = (n, sing, plur) => `${n} ${n === 1 ? sing : plur}`;
+
+  // Alertas (somente os que têm contagem > 0)
+  const alertas = [
+    {
+      cond: stats.alugueisAtrasados > 0,
+      icon: <Clock size={18} />, color: 'var(--danger)',
+      texto: plural(stats.alugueisAtrasados, 'aluguel atrasado', 'aluguéis atrasados'),
+      onClick: () => navigate('/inadimplencia')
+    },
+    {
+      cond: stats.reajustesPendentes > 0,
+      icon: <TrendingUp size={18} />, color: 'var(--warning)',
+      texto: plural(stats.reajustesPendentes, 'reajuste pendente', 'reajustes pendentes'),
+      onClick: () => navigate('/contratos')
+    },
+    {
+      cond: stats.contratosVencendo > 0,
+      icon: <CalendarClock size={18} />, color: '#d97706',
+      texto: plural(stats.contratosVencendo, 'contrato vencendo', 'contratos vencendo'),
+      onClick: () => navigate('/contratos')
+    },
+    {
+      cond: stats.alertas?.despesasAtrasadas > 0,
+      icon: <DollarSign size={18} />, color: 'var(--danger)',
+      texto: plural(stats.alertas.despesasAtrasadas, 'despesa atrasada', 'despesas atrasadas'),
+      onClick: () => navigate('/contas-a-pagar?status=atrasado')
+    }
+  ].filter(a => a.cond);
+
+  // Distribuição dos imóveis
+  const distribuicao = [
+    { label: 'Alugados', value: stats.imoveisAlugados, color: 'var(--accent)' },
+    { label: 'Vagos', value: stats.imoveisVagos, color: 'var(--success)' },
+    { label: 'Em Negociação', value: stats.imoveisNegociacao, color: 'var(--warning)' },
+    { label: 'Em Manutenção', value: stats.imoveisManutencao, color: 'var(--gray-400)' }
+  ];
+  const pieData = distribuicao.filter(d => d.value > 0);
+
+  const renderPieLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, value }) => {
+    if (!value) return null;
+    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+    return (
+      <text x={x} y={y} fill="#fff" textAnchor="middle" dominantBaseline="central" fontSize={13} fontWeight={700}>
+        {value}
+      </text>
+    );
+  };
+
+  // Resumo financeiro do mês
+  const resumo = [
+    { icon: <ArrowDownCircle size={18} />, color: 'var(--success)', label: 'A receber:', value: formatMoeda(stats.totalReceber), valueColor: 'var(--success)' },
+    { icon: <CheckCircle2 size={18} />, color: 'var(--success)', label: 'Recebido:', value: formatMoeda(stats.totalRecebido), valueColor: 'var(--success)' },
+    { icon: <Clock size={18} />, color: 'var(--warning)', label: 'Em aberto:', value: formatMoeda(stats.valorAberto), valueColor: 'var(--warning)' },
+    { icon: <ArrowUpCircle size={18} />, color: 'var(--danger)', label: 'Despesas:', value: formatMoeda(stats.despesasMes), valueColor: 'var(--danger)' },
+    { icon: <CreditCard size={18} />, color: 'var(--accent)', label: 'Saldo previsto:', value: formatMoeda(saldoPrevisto), valueColor: 'var(--accent)' }
+  ];
+
+  // Atalhos rápidos
+  const atalhos = [
+    { icon: <Building2 size={22} />, color: 'var(--accent)', label: 'Cadastrar Imóvel', onClick: () => navigate('/imoveis') },
+    { icon: <FileText size={22} />, color: 'var(--success)', label: 'Novo Contrato', onClick: () => navigate('/contratos') },
+    { icon: <DollarSign size={22} />, color: '#8b5cf6', label: 'Registrar Pagamento', onClick: () => navigate('/pagamentos') },
+    { icon: <Calendar size={22} />, color: '#f97316', label: 'Ver Agenda', onClick: () => navigate('/agenda') }
+  ];
 
   return (
     <div>
       <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--gray-800)', margin: 0 }}>Dashboard</h1>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: 'var(--gray-800)', margin: 0 }}>Dashboard</h1>
         <p style={{ color: 'var(--gray-500)', margin: '4px 0 0', fontSize: 14 }}>
-          Visão geral dos imóveis, contratos, pagamentos e pendências.
+          Resumo geral dos imóveis, contratos, pagamentos e pendências.
         </p>
       </div>
-      <div className="stats-grid">
-        <StatCard
-          icon={<Building2 size={22} />}
-          value={stats.totalImoveis}
-          label="Total de Imóveis"
-          color="var(--primary)"
-          onClick={() => navigate('/imoveis')}
+
+      {/* Cards do topo */}
+      <div className="dash-stats">
+        <DashStat
+          icon={<Home size={24} />} label="Imóveis Cadastrados" value={stats.totalImoveis}
+          color="var(--accent)" onClick={() => navigate('/imoveis')}
         />
-        <StatCard
-          icon={<CheckCircle2 size={22} />}
-          value={stats.imoveisAlugados}
-          label="Imóveis Alugados"
-          color="var(--success)"
-          onClick={() => navigate('/imoveis?status=alugado')}
+        <DashStat
+          icon={<PieIcon size={24} />} label="Taxa de Ocupação" value={`${taxaOcupacao}%`}
+          color="var(--success)" onClick={() => navigate('/imoveis')}
         />
-        <StatCard
-          icon={<KeyRound size={22} />}
-          value={stats.imoveisVagos}
-          label="Imóveis Vagos"
-          color="var(--warning)"
-          onClick={() => navigate('/imoveis?status=vago')}
+        <DashStat
+          icon={<Wallet size={24} />} label="A Receber no Mês" value={formatMoeda(stats.totalReceber)}
+          color="var(--accent)" valueColor="var(--accent)" onClick={() => navigate('/pagamentos?status=pendente')}
         />
-        <StatCard
-          icon={<DollarSign size={22} />}
-          value={formatMoeda(stats.totalReceber)}
-          label={`A Receber — ${mesAtual}`}
-          color="var(--info)"
-          onClick={() => navigate('/pagamentos?status=pendente')}
-        />
-        <StatCard
-          icon={<Banknote size={22} />}
-          value={formatMoeda(stats.totalRecebido)}
-          label={`Recebido — ${mesAtual}`}
-          color="var(--success)"
-          onClick={() => navigate('/pagamentos')}
-        />
-        <StatCard
-          icon={<AlertCircle size={22} />}
-          value={formatMoeda(stats.valorAberto)}
-          label="Valor em Aberto"
-          color="var(--danger)"
-          onClick={() => navigate('/pagamentos?status=atrasado')}
-        />
-        <StatCard
-          icon={<AlertTriangle size={22} />}
-          value={stats.alugueisAtrasados}
-          label="Aluguéis Atrasados"
-          color="var(--danger)"
-          onClick={() => navigate('/inadimplencia')}
-        />
-        <StatCard
-          icon={<Receipt size={22} />}
-          value={formatMoeda(stats.despesasMes)}
-          label={`Despesas — ${mesAtual}`}
-          color="var(--warning)"
-          onClick={() => navigate('/contas-a-pagar')}
-        />
-        <StatCard
-          icon={<FileText size={22} />}
-          value={stats.contratosVencendo}
-          label="Contratos Vencendo (30d)"
-          color="var(--warning)"
-          onClick={() => navigate('/contratos')}
-        />
-        <StatCard
-          icon={<TrendingUp size={22} />}
-          value={stats.reajustesPendentes}
-          label="Reajustes Pendentes"
-          color="var(--accent)"
-          onClick={() => navigate('/reajustes')}
+        <DashStat
+          icon={<AlertTriangle size={24} />} label="Em Aberto" value={formatMoeda(stats.valorAberto)}
+          color="#f97316" valueColor="#f97316" onClick={() => navigate('/pagamentos?status=atrasado')}
         />
       </div>
 
-      <div className="charts-grid">
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">Evolução Mensal de Aluguéis</span>
-          </div>
-          <div className="card-body">
-            {evolucao.length > 0 ? (
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={evolucao} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--gray-200)" />
-                  <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                  <YAxis tickFormatter={(v) => `R$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 12 }} />
-                  <Tooltip formatter={(v) => formatMoeda(v)} />
-                  <Legend />
-                  <Bar dataKey="A Receber" fill="var(--accent)" radius={[4,4,0,0]} />
-                  <Bar dataKey="Recebido" fill="var(--success)" radius={[4,4,0,0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="empty-state">
-                <div>Sem dados para exibir</div>
+      {/* Alertas importantes */}
+      {alertas.length > 0 && (
+        <div className="card dash-alerts">
+          <div className="card-header"><span className="card-title">Alertas Importantes</span></div>
+          <div className="dash-alerts-row">
+            {alertas.map((a, i) => (
+              <div key={i} className="dash-alert-item" onClick={a.onClick}>
+                <span className="dash-alert-icon" style={{ background: `color-mix(in srgb, ${a.color} 14%, transparent)`, color: a.color }}>
+                  {a.icon}
+                </span>
+                <span className="dash-alert-text" style={{ color: a.color }}>{a.texto}</span>
               </div>
-            )}
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">Distribuição dos Imóveis</span>
-          </div>
-          <div className="card-body">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {[
-                { label: 'Alugados', value: stats.imoveisAlugados, total: stats.totalImoveis, color: 'var(--success)' },
-                { label: 'Vagos', value: stats.imoveisVagos, total: stats.totalImoveis, color: 'var(--warning)' },
-                { label: 'Em Negociação', value: stats.imoveisNegociacao, total: stats.totalImoveis, color: 'var(--info)' },
-                { label: 'Em Manutenção', value: stats.imoveisManutencao, total: stats.totalImoveis, color: 'var(--danger)' }
-              ].map((item) => {
-                const pct = stats.totalImoveis > 0 ? Math.round((item.value / stats.totalImoveis) * 100) : 0;
-                return (
-                  <div key={item.label}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 14 }}>
-                      <span style={{ color: 'var(--gray-700)', fontWeight: 500 }}>{item.label}</span>
-                      <span style={{ color: item.color, fontWeight: 600 }}>{item.value} ({pct}%)</span>
-                    </div>
-                    <div style={{ height: 8, background: 'var(--gray-100)', borderRadius: 4, overflow: 'hidden' }}>
-                      <div style={{ width: `${pct}%`, height: '100%', background: item.color, borderRadius: 4, transition: 'width 0.5s' }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <hr className="divider" />
-
-            <div style={{ fontSize: 14, color: 'var(--gray-600)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                <span>Taxa de Ocupação</span>
-                <strong style={{ color: 'var(--primary)' }}>
-                  {stats.totalImoveis > 0 ? Math.round((stats.imoveisAlugados / stats.totalImoveis) * 100) : 0}%
-                </strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>Receita potencial mensal</span>
-                <strong style={{ color: 'var(--success)' }}>{formatMoeda(stats.totalReceber)}</strong>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {((stats.alertas?.contratosVencendo7Dias > 0) || (stats.alertas?.reajustesUrgentes > 0) || (stats.alertas?.despesasAtrasadas > 0) || stats.alugueisAtrasados > 0) && (
-        <div>
-          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12, color: 'var(--gray-700)' }}>
-            Alertas
-          </h2>
-          <div className="alerts-grid">
-            {stats.alugueisAtrasados > 0 && (
-              <AlertCard
-                icon={<AlertCircle size={24} />}
-                title="Aluguéis Atrasados"
-                value={stats.alugueisAtrasados}
-                description={`Pagamentos em atraso em ${mesAtual}/${anoAtual}`}
-                color="var(--danger)"
-                onClick={() => navigate('/pagamentos?status=atrasado')}
-              />
-            )}
-            {stats.alertas?.contratosVencendo7Dias > 0 && (
-              <AlertCard
-                icon={<FileText size={24} />}
-                title="Contratos Vencendo"
-                value={stats.alertas.contratosVencendo7Dias}
-                description="Contratos que vencem nos próximos 7 dias"
-                color="var(--warning)"
-                onClick={() => navigate('/contratos')}
-              />
-            )}
-            {stats.alertas?.reajustesUrgentes > 0 && (
-              <AlertCard
-                icon={<TrendingUp size={24} />}
-                title="Reajustes Urgentes"
-                value={stats.alertas.reajustesUrgentes}
-                description="Reajustes pendentes para os próximos 30 dias"
-                color="var(--accent)"
-                onClick={() => navigate('/reajustes')}
-              />
-            )}
-            {stats.alertas?.despesasAtrasadas > 0 && (
-              <AlertCard
-                icon={<Receipt size={24} />}
-                title="Despesas Atrasadas"
-                value={stats.alertas.despesasAtrasadas}
-                description="Despesas com pagamento em atraso"
-                color="var(--warning)"
-                onClick={() => navigate('/contas-a-pagar?status=atrasado')}
-              />
-            )}
+            ))}
           </div>
         </div>
       )}
+
+      {/* Evolução + Distribuição */}
+      <div className="charts-grid">
+        <div className="card">
+          <div className="card-header"><span className="card-title">Evolução Mensal de Aluguéis</span></div>
+          <div className="card-body">
+            {evolucao.length > 0 ? (
+              <ResponsiveContainer width="100%" height={260}>
+                <AreaChart data={evolucao} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                  <defs>
+                    <linearGradient id="gradAReceber" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="var(--accent)" stopOpacity={0.35} />
+                      <stop offset="95%" stopColor="var(--accent)" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--gray-200)" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <Tooltip formatter={(v) => formatMoeda(v)} />
+                  <Area
+                    type="monotone" dataKey="A Receber" stroke="var(--accent)" strokeWidth={2}
+                    fill="url(#gradAReceber)" dot={{ r: 3, fill: 'var(--accent)' }} activeDot={{ r: 5 }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="empty-state"><div>Sem dados para exibir</div></div>
+            )}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-header"><span className="card-title">Distribuição dos Imóveis</span></div>
+          <div className="card-body">
+            <div className="dash-donut">
+              <div className="dash-donut-chart">
+                {stats.totalImoveis > 0 ? (
+                  <ResponsiveContainer width="100%" height={200}>
+                    <PieChart>
+                      <Pie
+                        data={pieData} dataKey="value" nameKey="label"
+                        cx="50%" cy="50%" innerRadius={50} outerRadius={85}
+                        paddingAngle={2} labelLine={false} label={renderPieLabel}
+                      >
+                        {pieData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                      </Pie>
+                      <Tooltip formatter={(v, n) => [v, n]} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="empty-state"><div>Nenhum imóvel cadastrado</div></div>
+                )}
+              </div>
+              <div className="dash-donut-legend">
+                {distribuicao.map((d) => {
+                  const pct = stats.totalImoveis > 0 ? Math.round((d.value / stats.totalImoveis) * 100) : 0;
+                  return (
+                    <div key={d.label} className="dash-legend-item">
+                      <span className="dash-legend-dot" style={{ background: d.color }} />
+                      <span className="dash-legend-label">{d.label}</span>
+                      <span className="dash-legend-value">{d.value} ({pct}%)</span>
+                    </div>
+                  );
+                })}
+                <div className="dash-legend-ocupacao">
+                  Taxa de ocupação: <strong style={{ color: 'var(--accent)' }}>{taxaOcupacao}%</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Resumo financeiro + Atalhos */}
+      <div className="charts-grid">
+        <div className="card">
+          <div className="card-header"><span className="card-title">Resumo Financeiro do Mês</span></div>
+          <div className="card-body">
+            <div className="dash-resumo">
+              {resumo.map((r, i) => (
+                <div key={i} className="dash-resumo-row">
+                  <span className="dash-resumo-icon" style={{ color: r.color }}>{r.icon}</span>
+                  <span className="dash-resumo-label">{r.label}</span>
+                  <span className="dash-resumo-value" style={{ color: r.valueColor }}>{r.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-header"><span className="card-title">Atalhos Rápidos</span></div>
+          <div className="card-body">
+            <div className="dash-shortcuts">
+              {atalhos.map((a, i) => (
+                <button key={i} className="dash-shortcut" onClick={a.onClick}>
+                  <span className="dash-shortcut-icon" style={{ background: `color-mix(in srgb, ${a.color} 14%, transparent)`, color: a.color }}>
+                    {a.icon}
+                  </span>
+                  <span className="dash-shortcut-label" style={{ color: a.color }}>{a.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

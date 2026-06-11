@@ -4,7 +4,7 @@ import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 
 const pageTitles = {
-  '/': { title: 'Dashboard', subtitle: 'Visão geral do sistema' },
+  '/': { title: 'Dashboard', subtitle: 'Resumo geral dos imóveis, contratos, pagamentos e pendências.' },
   '/agenda': { title: 'Agenda', subtitle: 'Compromissos e vencimentos' },
   '/imoveis': { title: 'Imóveis', subtitle: 'Cadastro e gerenciamento de imóveis' },
   '/contratos': { title: 'Contratos', subtitle: 'Gerenciamento de contratos' },
