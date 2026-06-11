@@ -1713,20 +1713,100 @@ app.get('/api/despesas/exportar/excel', authenticateToken, async (req, res) => {
   }
 });
 
+// ============================================================
+// PDF de relatórios — cabeçalho e rodapé padronizados
+// ============================================================
+
+// Nome da empresa exibido no topo dos relatórios (configurável por env).
+const EMPRESA_NOME = process.env.EMPRESA_NOME || 'Sistema de Gestão de Aluguéis';
+
+const MESES_REL = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+// Desenha o cabeçalho padrão (faixa azul com nome da empresa + data de emissão,
+// título, período e linha de resumo). Retorna o Y onde o conteúdo deve começar.
+function desenharCabecalhoRelatorio(doc, { titulo, periodo, resumo } = {}) {
+  const M = doc.page.margins.left;
+  const right = doc.page.width - doc.page.margins.right;
+  const largura = right - M;
+  let y = M;
+
+  // Faixa azul com nome da empresa + data de emissão
+  doc.rect(M, y, largura, 34).fill('#1e3a5f');
+  doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(14)
+    .text(EMPRESA_NOME, M + 12, y + 10, { width: largura - 220, lineBreak: false });
+  doc.font('Helvetica').fontSize(9).fillColor('#c7d2e5')
+    .text(`Emitido em ${new Date().toLocaleString('pt-BR')}`, M, y + 12, { width: largura - 12, align: 'right' });
+  y += 34 + 12;
+
+  // Título do relatório
+  doc.fillColor('#1e3a5f').font('Helvetica-Bold').fontSize(14).text(titulo || 'Relatório', M, y);
+  y = doc.y + 1;
+
+  // Período
+  if (periodo) {
+    doc.fillColor('#666666').font('Helvetica').fontSize(10).text(periodo, M, y);
+    y = doc.y + 1;
+  }
+
+  // Linha de resumo (ex.: Total: R$ X · N registros)
+  if (resumo && resumo.length) {
+    const texto = resumo.map((r) => `${r.label}: ${r.valor}`).join('     ·     ');
+    doc.fillColor('#333333').font('Helvetica-Bold').fontSize(10).text(texto, M, y);
+    y = doc.y + 1;
+  }
+
+  y += 8;
+  doc.moveTo(M, y).lineTo(right, y).strokeColor('#1e3a5f').lineWidth(1).stroke();
+  doc.strokeColor('#000000').lineWidth(1).fillColor('#000000');
+  doc.y = y + 10;
+  return doc.y;
+}
+
+// Adiciona rodapé (linha + nome da empresa + "Página X de Y") em todas as
+// páginas. Requer que o PDFDocument seja criado com { bufferPages: true }.
+function desenharRodapesRelatorio(doc) {
+  const range = doc.bufferedPageRange();
+  for (let i = range.start; i < range.start + range.count; i++) {
+    doc.switchToPage(i);
+    const M = doc.page.margins.left;
+    const right = doc.page.width - doc.page.margins.right;
+    const yLinha = doc.page.height - doc.page.margins.bottom + 10;
+    // Escrever na área da margem inferior dispararia auto-paginação do PDFKit;
+    // zera a margem de baixo durante a escrita e restaura em seguida.
+    const margemBaixo = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
+    doc.moveTo(M, yLinha).lineTo(right, yLinha).strokeColor('#d0d7e2').lineWidth(0.5).stroke();
+    doc.strokeColor('#000000');
+    doc.fillColor('#999999').font('Helvetica').fontSize(8)
+      .text(EMPRESA_NOME, M, yLinha + 4, { width: (right - M) / 2, align: 'left', lineBreak: false });
+    doc.text(`Página ${i - range.start + 1} de ${range.count}`, M, yLinha + 4, { width: right - M, align: 'right', lineBreak: false });
+    doc.page.margins.bottom = margemBaixo;
+  }
+}
+
 app.get('/api/despesas/exportar/pdf', authenticateToken, async (req, res) => {
   try {
     const rows = await buscarDespesasParaExport(req);
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="despesas-${new Date().toISOString().split('T')[0]}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="contas-a-pagar-${new Date().toISOString().split('T')[0]}.pdf"`);
 
-    const doc = new PDFDocument({ size: 'A4', margin: 40, layout: 'landscape' });
+    const doc = new PDFDocument({ size: 'A4', margin: 40, layout: 'landscape', bufferPages: true });
     doc.pipe(res);
 
-    doc.fontSize(16).font('Helvetica-Bold').text('Relatório de Despesas', { align: 'center' });
-    doc.moveDown(0.3);
-    doc.fontSize(10).font('Helvetica').text(`Gerado em ${new Date().toLocaleString('pt-BR')}`, { align: 'center' });
-    doc.moveDown();
+    const totalGeral = rows.reduce((s, r) => s + parseFloat(r.valor || 0), 0);
+    const { mes: mesF, ano: anoF, status: statusF } = req.query;
+    let periodo = 'Período: todos os lançamentos';
+    if (mesF && anoF) periodo = `Período: ${MESES_REL[parseInt(mesF) - 1]}/${anoF}`;
+    else if (anoF) periodo = `Período: ano de ${anoF}`;
+    desenharCabecalhoRelatorio(doc, {
+      titulo: 'Relatório de Contas a Pagar',
+      periodo: statusF ? `${periodo} · Status: ${statusF}` : periodo,
+      resumo: [
+        { label: 'Total', valor: `R$ ${totalGeral.toFixed(2)}` },
+        { label: 'Lançamentos', valor: String(rows.length) }
+      ]
+    });
 
     // Cabeçalho da tabela
     const startX = 40;
@@ -1739,19 +1819,24 @@ app.get('/api/despesas/exportar/pdf', authenticateToken, async (req, res) => {
       { label: 'Vencimento', x: 420, w: 80 },
       { label: 'Status', x: 500, w: 70 }
     ];
-    doc.fontSize(10).font('Helvetica-Bold');
-    cols.forEach((c) => doc.text(c.label, startX + c.x, y, { width: c.w }));
-    y += 18;
-    doc.moveTo(startX, y - 4).lineTo(startX + 570, y - 4).stroke();
+    const drawColsHeader = () => {
+      doc.fontSize(10).font('Helvetica-Bold').fillColor('#1e3a5f');
+      cols.forEach((c) => doc.text(c.label, startX + c.x, y, { width: c.w, lineBreak: false }));
+      y += 18;
+      doc.moveTo(startX, y - 4).lineTo(startX + 570, y - 4).strokeColor('#1e3a5f').stroke();
+      doc.strokeColor('#000000').fillColor('#000000').fontSize(9).font('Helvetica');
+    };
+    drawColsHeader();
 
-    doc.fontSize(9).font('Helvetica');
     let total = 0;
     rows.forEach((r) => {
-      if (y > 540) {
+      if (y > 520) {
         doc.addPage();
         y = 40;
+        drawColsHeader();
       }
       const venc = r.vencimento ? new Date(r.vencimento).toLocaleDateString('pt-BR') : '—';
+      doc.fillColor('#333333');
       doc.text(r.imovel_codigo || 'Geral', startX + cols[0].x, y, { width: cols[0].w });
       doc.text(r.tipo_nome || r.tipo, startX + cols[1].x, y, { width: cols[1].w });
       doc.text((r.descricao || '—').substring(0, 50), startX + cols[2].x, y, { width: cols[2].w });
@@ -1763,10 +1848,11 @@ app.get('/api/despesas/exportar/pdf', authenticateToken, async (req, res) => {
     });
 
     y += 10;
-    doc.moveTo(startX, y).lineTo(startX + 570, y).stroke();
+    doc.moveTo(startX, y).lineTo(startX + 570, y).strokeColor('#1e3a5f').stroke();
     y += 6;
-    doc.fontSize(11).font('Helvetica-Bold').text(`TOTAL: R$ ${total.toFixed(2)}`, startX + 340, y);
+    doc.fillColor('#1e3a5f').fontSize(11).font('Helvetica-Bold').text(`TOTAL: R$ ${total.toFixed(2)}`, startX + 340, y);
 
+    desenharRodapesRelatorio(doc);
     doc.end();
   } catch (error) {
     console.error('Erro ao exportar despesas PDF:', error);
@@ -2285,28 +2371,83 @@ app.get('/api/relatorios/exportar/pdf', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Nenhum dado encontrado para os filtros informados' });
     }
 
-    const doc = new PDFDocument({ size: 'A4', margin: 40, layout: 'landscape' });
+    const doc = new PDFDocument({ size: 'A4', margin: 40, layout: 'landscape', bufferPages: true });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=relatorio-${tipo}-${Date.now()}.pdf`);
     doc.pipe(res);
 
-    // Mapeamento explícito de colunas por tipo de relatório
-    const colunasMensal = ['codigo', 'endereco', 'inquilino', 'valor_aluguel', 'data_vencimento', 'status'];
-    const colunasInad = ['imovel_codigo', 'imovel_endereco', 'inquilino_nome', 'mes', 'ano', 'valor_aluguel', 'dias_atraso'];
-    const colunasVagos = ['codigo', 'tipo', 'endereco', 'valor_sem_desconto', 'dia_vencimento', 'status'];
-    const colunas = tipo === 'mensal' ? colunasMensal : tipo === 'inadimplencia' ? colunasInad : colunasVagos;
+    // Colunas (campo + rótulo + largura) por tipo de relatório
+    const defsMensal = [
+      { key: 'codigo', label: 'Imóvel', w: 70 },
+      { key: 'endereco', label: 'Endereço', w: 230 },
+      { key: 'inquilino', label: 'Inquilino', w: 170 },
+      { key: 'valor_aluguel', label: 'Valor', w: 90, money: true },
+      { key: 'data_vencimento', label: 'Vencimento', w: 90, date: true },
+      { key: 'status', label: 'Status', w: 80 }
+    ];
+    const defsInad = [
+      { key: 'imovel_codigo', label: 'Imóvel', w: 70 },
+      { key: 'inquilino_nome', label: 'Inquilino', w: 220 },
+      { key: 'mes', label: 'Mês', w: 50 },
+      { key: 'ano', label: 'Ano', w: 50 },
+      { key: 'valor_aluguel', label: 'Valor', w: 90, money: true },
+      { key: 'dias_atraso', label: 'Dias atraso', w: 80 }
+    ];
+    const defsVagos = [
+      { key: 'codigo', label: 'Código', w: 80 },
+      { key: 'tipo', label: 'Tipo', w: 100 },
+      { key: 'endereco', label: 'Endereço', w: 280 },
+      { key: 'valor_sem_desconto', label: 'Valor', w: 90, money: true },
+      { key: 'dia_vencimento', label: 'Venc.', w: 60 },
+      { key: 'status', label: 'Status', w: 80 }
+    ];
+    const defs = tipo === 'mensal' ? defsMensal : tipo === 'inadimplencia' ? defsInad : defsVagos;
 
-    doc.fontSize(16).fillColor('#1e3a5f').text(titulo, { align: 'center' });
-    doc.fontSize(10).fillColor('#666').text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')}`, { align: 'center' });
-    doc.moveDown();
+    // Período e resumo
+    let periodo = `Total de registros: ${rows.length}`;
+    if (tipo === 'mensal') periodo = `Período: ${meses[parseInt(mes) - 1]}/${ano}`;
+    const resumo = [{ label: 'Registros', valor: String(rows.length) }];
+    if (tipo === 'mensal' || tipo === 'inadimplencia') {
+      const somaValor = rows.reduce((s, r) => s + parseFloat(r.valor_aluguel || 0), 0);
+      resumo.unshift({ label: 'Valor total', valor: `R$ ${somaValor.toFixed(2)}` });
+    }
 
-    rows.forEach((row, i) => {
-      if (i > 0 && i % 25 === 0) doc.addPage();
-      doc.fontSize(9).fillColor('#333');
-      const line = colunas.map(col => String(row[col] ?? '')).join(' | ');
-      doc.text(line, 40, doc.y, { width: 760 });
+    desenharCabecalhoRelatorio(doc, { titulo, periodo, resumo });
+
+    const startX = doc.page.margins.left;
+    const larguraTabela = defs.reduce((s, d) => s + d.w, 0);
+    const fmtCell = (val, def) => {
+      if (val == null || val === '') return '—';
+      if (def.money) return `R$ ${parseFloat(val).toFixed(2)}`;
+      if (def.date) { const d = new Date(val); return isNaN(d.getTime()) ? String(val) : d.toLocaleDateString('pt-BR'); }
+      return String(val);
+    };
+    const drawHeader = () => {
+      const hy = doc.y;
+      let x = startX;
+      doc.fontSize(9).font('Helvetica-Bold').fillColor('#1e3a5f');
+      defs.forEach((d) => { doc.text(d.label, x, hy, { width: d.w, lineBreak: false }); x += d.w; });
+      const ly = hy + 14;
+      doc.moveTo(startX, ly).lineTo(startX + larguraTabela, ly).strokeColor('#1e3a5f').lineWidth(0.5).stroke();
+      doc.strokeColor('#000000').fillColor('#000000');
+      doc.y = ly + 4;
+    };
+    drawHeader();
+
+    rows.forEach((row) => {
+      if (doc.y > doc.page.height - doc.page.margins.bottom - 24) {
+        doc.addPage();
+        doc.y = doc.page.margins.top;
+        drawHeader();
+      }
+      const rowY = doc.y;
+      let x = startX;
+      doc.fontSize(8).font('Helvetica').fillColor('#333333');
+      defs.forEach((d) => { doc.text(fmtCell(row[d.key], d), x, rowY, { width: d.w, lineBreak: false }); x += d.w; });
+      doc.y = rowY + 13;
     });
 
+    desenharRodapesRelatorio(doc);
     doc.end();
   } catch (error) {
     res.status(500).json({ error: 'Erro ao exportar PDF' });
