@@ -1,11 +1,22 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { relatoriosService } from '../../services/api';
+import { relatoriosService, pagamentosService } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
+import Modal from '../../components/Modal';
+import { MoneyInput } from '../../components/MaskedInput';
 import MetricCard from '../../components/MetricCard';
 import { EmptyState, ErrorState } from '../../components/StateViews';
 import SearchInput from '../../components/filters/SearchInput';
 import { formatMoeda, formatData, MESES } from '../../utils/format';
-import { AlertTriangle, ChevronDown, ChevronRight, Phone, Copy, MessageCircle, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, Phone, Copy, MessageCircle, CheckCircle2, Banknote } from 'lucide-react';
+
+const FORMAS_PAG = [
+  { value: 'pix', label: 'PIX' },
+  { value: 'dinheiro', label: 'Dinheiro' },
+  { value: 'transferencia', label: 'Transferência' },
+  { value: 'boleto', label: 'Boleto' },
+  { value: 'cartao', label: 'Cartão' }
+];
+const hojeISO = () => new Date().toISOString().split('T')[0];
 
 const statusInfo = (s) => {
   const map = {
@@ -34,6 +45,10 @@ export default function Inadimplencia() {
   const [erro, setErro] = useState(null);
   const [abertos, setAbertos] = useState(new Set());
   const [busca, setBusca] = useState('');
+  // Modal "Informar pagamento" (dar baixa direto da inadimplência)
+  const [pagAlvo, setPagAlvo] = useState(null); // { ...parcela, inquilino_nome }
+  const [pagForm, setPagForm] = useState({ data_pagamento: hojeISO(), forma_pagamento: 'pix', valor_recebido: '', juros: '', multa: '', desconto: '' });
+  const [pagSalvando, setPagSalvando] = useState(false);
   const toast = useToast();
 
   const carregar = useCallback(async () => {
@@ -90,6 +105,47 @@ export default function Inadimplencia() {
     const t = busca.toLowerCase();
     return inquilinos.filter((i) => i.inquilino_nome.toLowerCase().includes(t));
   }, [inquilinos, busca]);
+
+  // ===== Informar pagamento (dar baixa direto da inadimplência) =====
+  const setPF = (campo, valor) => setPagForm((prev) => ({ ...prev, [campo]: valor }));
+
+  const abrirPagamento = (p, inquilinoNome) => {
+    setPagAlvo({ ...p, inquilino_nome: inquilinoNome });
+    setPagForm({
+      data_pagamento: hojeISO(), forma_pagamento: 'pix',
+      valor_recebido: (parseFloat(p.falta) || 0).toFixed(2),
+      juros: '', multa: '', desconto: ''
+    });
+  };
+
+  const pagTotalDevido = pagAlvo
+    ? (parseFloat(pagAlvo.valor_aluguel || 0) + (parseFloat(pagForm.juros) || 0) + (parseFloat(pagForm.multa) || 0) - (parseFloat(pagForm.desconto) || 0))
+    : 0;
+  const pagJaRecebido = pagAlvo ? parseFloat(pagAlvo.valor_recebido || 0) : 0;
+  const pagValorRecebido = parseFloat(pagForm.valor_recebido) || 0;
+  const pagSaldo = pagTotalDevido - pagJaRecebido - pagValorRecebido;
+
+  const confirmarPagamento = async () => {
+    if (!pagValorRecebido || pagValorRecebido <= 0) { toast.error('Informe o valor recebido'); return; }
+    setPagSalvando(true);
+    try {
+      await pagamentosService.pagar(pagAlvo.id, {
+        data_pagamento: pagForm.data_pagamento,
+        valor_recebido: pagValorRecebido,
+        forma_pagamento: pagForm.forma_pagamento || undefined,
+        juros: parseFloat(pagForm.juros) || 0,
+        multa: parseFloat(pagForm.multa) || 0,
+        desconto: parseFloat(pagForm.desconto) || 0
+      });
+      toast.success(pagSaldo > 0.005 ? 'Pagamento parcial registrado!' : 'Pagamento registrado — parcela quitada!');
+      setPagAlvo(null);
+      carregar();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erro ao informar pagamento');
+    } finally {
+      setPagSalvando(false);
+    }
+  };
 
   const totalAtrasado = (resumo?.total_atrasado || 0) + (resumo?.total_pendente || 0);
 
@@ -207,6 +263,7 @@ export default function Inadimplencia() {
                             <th>Valor</th>
                             <th>Recebido</th>
                             <th>Falta</th>
+                            <th>Ações</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -224,6 +281,11 @@ export default function Inadimplencia() {
                                 <td>{formatMoeda(p.valor_aluguel)}</td>
                                 <td>{p.valor_recebido ? formatMoeda(p.valor_recebido) : '—'}</td>
                                 <td><strong style={{ color: 'var(--danger)' }}>{formatMoeda(p.falta)}</strong></td>
+                                <td>
+                                  <button className="btn btn-success btn-sm" title="Informar pagamento" onClick={() => abrirPagamento(p, inq.inquilino_nome)}>
+                                    <Banknote size={13} /> Dar baixa
+                                  </button>
+                                </td>
                               </tr>
                             );
                           })}
@@ -253,6 +315,82 @@ export default function Inadimplencia() {
           )}
         </div>
       )}
+
+      {/* ===== Modal informar pagamento (dar baixa) ===== */}
+      <Modal
+        isOpen={!!pagAlvo}
+        onClose={() => setPagAlvo(null)}
+        title="Informar pagamento"
+        size="lg"
+        footer={
+          <>
+            <button className="btn btn-ghost" onClick={() => setPagAlvo(null)}>Cancelar</button>
+            <button className="btn btn-success" onClick={confirmarPagamento} disabled={pagSalvando}>
+              {pagSalvando ? 'Confirmando...' : 'Confirmar pagamento'}
+            </button>
+          </>
+        }
+      >
+        {pagAlvo && (
+          <>
+            <div style={{ background: 'var(--gray-50)', borderRadius: 'var(--radius)', padding: 14, marginBottom: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 13 }}>
+                <div><span style={{ color: 'var(--gray-500)' }}>Inquilino:</span> <strong>{pagAlvo.inquilino_nome}</strong></div>
+                <div><span style={{ color: 'var(--gray-500)' }}>Imóvel:</span> {pagAlvo.imovel_codigo}</div>
+                <div><span style={{ color: 'var(--gray-500)' }}>Referência:</span> {MESES[pagAlvo.mes - 1]}/{pagAlvo.ano}</div>
+                <div><span style={{ color: 'var(--gray-500)' }}>Vencimento:</span> {formatData(pagAlvo.data_vencimento)}</div>
+                <div><span style={{ color: 'var(--gray-500)' }}>Valor do aluguel:</span> <strong>{formatMoeda(pagAlvo.valor_aluguel)}</strong></div>
+                <div><span style={{ color: 'var(--gray-500)' }}>Em aberto:</span> <strong style={{ color: 'var(--danger)' }}>{formatMoeda(pagAlvo.falta)}</strong></div>
+              </div>
+              <div className="form-hint" style={{ marginTop: 8 }}>Pagamento total ou parcial. O valor restante continua em aberto.</div>
+            </div>
+
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">Data do pagamento <span className="required">*</span></label>
+                <input className="form-control" type="date" value={pagForm.data_pagamento} onChange={(e) => setPF('data_pagamento', e.target.value)} required />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Forma de pagamento</label>
+                <select className="form-control" value={pagForm.forma_pagamento} onChange={(e) => setPF('forma_pagamento', e.target.value)}>
+                  {FORMAS_PAG.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">Valor recebido <span className="required">*</span></label>
+                <MoneyInput value={pagForm.valor_recebido} onChange={(v) => setPF('valor_recebido', v)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Desconto</label>
+                <MoneyInput value={pagForm.desconto} onChange={(v) => setPF('desconto', v)} />
+              </div>
+            </div>
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">Juros</label>
+                <MoneyInput value={pagForm.juros} onChange={(v) => setPF('juros', v)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Multa</label>
+                <MoneyInput value={pagForm.multa} onChange={(v) => setPF('multa', v)} />
+              </div>
+            </div>
+
+            <div style={{ borderTop: '1px solid var(--gray-200)', marginTop: 8, paddingTop: 12, display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
+              <div>
+                <div style={{ color: 'var(--gray-500)' }}>Total a receber (c/ encargos)</div>
+                <strong>{formatMoeda(pagTotalDevido)}</strong>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ color: 'var(--gray-500)' }}>{pagSaldo > 0.005 ? 'Ficará em aberto' : 'Saldo'}</div>
+                <strong style={{ color: pagSaldo > 0.005 ? 'var(--warning)' : 'var(--success)' }}>{formatMoeda(Math.max(0, pagSaldo))}</strong>
+              </div>
+            </div>
+          </>
+        )}
+      </Modal>
     </div>
   );
 }
