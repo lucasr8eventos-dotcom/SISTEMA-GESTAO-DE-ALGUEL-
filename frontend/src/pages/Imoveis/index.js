@@ -331,8 +331,7 @@ export default function Imoveis() {
                   <th>Código</th>
                   <th>Tipo</th>
                   <th>Endereço</th>
-                  <th>Valor (c/ desc.)</th>
-                  <th>Valor (s/ desc.)</th>
+                  <th>Valor</th>
                   <th>Venc.</th>
                   <th>Status</th>
                   <th>Ações</th>
@@ -346,8 +345,12 @@ export default function Imoveis() {
                       <td><strong>{im.codigo}</strong></td>
                       <td>{tipoImovel(im.tipo)}</td>
                       <td style={{ maxWidth: 260 }}>{im.endereco}</td>
-                      <td>{im.valor_com_desconto ? formatMoeda(im.valor_com_desconto) : '—'}</td>
-                      <td>{formatMoeda(im.valor_sem_desconto)}</td>
+                      <td>
+                        <strong>{formatMoeda(im.valor_com_desconto || im.valor_sem_desconto)}</strong>
+                        {im.valor_com_desconto && parseFloat(im.valor_com_desconto) !== parseFloat(im.valor_sem_desconto) && (
+                          <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>s/ desc.: {formatMoeda(im.valor_sem_desconto)}</div>
+                        )}
+                      </td>
                       <td>Dia {im.dia_vencimento}</td>
                       <td><span className={`badge ${st.className}`}>{st.label}</span></td>
                       <td onClick={(e) => e.stopPropagation()}>

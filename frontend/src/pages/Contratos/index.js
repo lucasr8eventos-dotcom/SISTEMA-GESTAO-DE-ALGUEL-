@@ -441,10 +441,8 @@ export default function Contratos() {
                 <tr>
                   <th>Imóvel</th>
                   <th>Inquilino</th>
-                  <th>Início</th>
-                  <th>Fim</th>
+                  <th>Vigência</th>
                   <th>Valor</th>
-                  <th>Garantia</th>
                   <th>Status</th>
                   <th>Vencimento</th>
                   <th>Ações</th>
@@ -463,15 +461,18 @@ export default function Contratos() {
                         <strong>{c.inquilino_nome}</strong>
                         <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>{c.inquilino_telefone}</div>
                       </td>
-                      <td>{formatData(c.data_inicio)}</td>
                       <td>
-                        {formatData(c.data_fim)}
+                        <div>{formatData(c.data_inicio)} — {formatData(c.data_fim)}</div>
                         {c.status === 'ativo' && c.renovacao_automatica !== false && (
-                          <span className="chip" style={{ marginLeft: 6, fontSize: 10 }} title="Renova automaticamente +1 ano ao vencer">auto</span>
+                          <span className="chip" style={{ fontSize: 10 }} title="Renova automaticamente +1 ano ao vencer">auto</span>
                         )}
                       </td>
-                      <td>{formatMoeda(c.valor)}</td>
-                      <td>{garantiaLabel(c.garantia)}</td>
+                      <td>
+                        <strong>{formatMoeda(c.valor)}</strong>
+                        {c.garantia && c.garantia !== 'sem' && (
+                          <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>{garantiaLabel(c.garantia)}</div>
+                        )}
+                      </td>
                       <td><span className={`badge ${st.className}`}>{st.label}</span></td>
                       <td>{c.status === 'ativo' && getAlertaVencimento(c.dias_para_vencer)}</td>
                       <td onClick={(e) => e.stopPropagation()}>
