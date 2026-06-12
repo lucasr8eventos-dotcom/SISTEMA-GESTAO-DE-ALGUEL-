@@ -1314,6 +1314,15 @@ app.post('/api/contratos/:id/reajustar', authenticateToken, [
       [novoValor, id, dataReaj]
     );
 
+    // Resolve reajustes ANTERIORES ainda em aberto (pendente/avisado) deste
+    // contrato — marca como 'aplicado' para não continuarem contando como
+    // "reajuste pendente / próximo" depois que o reajuste já foi feito.
+    await client.query(
+      `UPDATE reajustes SET status='aplicado', data_ultimo=$2, updated_at=NOW()
+       WHERE contrato_id=$1 AND status IN ('pendente','avisado')`,
+      [id, dataReaj]
+    );
+
     await client.query(
       `INSERT INTO reajustes (imovel_id, contrato_id, valor_atual, data_ultimo, data_proximo, percentual, novo_valor, status, observacoes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,'aplicado',$8)`,
