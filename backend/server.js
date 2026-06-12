@@ -291,6 +291,13 @@ const sincronizarStatusVencidos = async () => {
     const agora = new Date();
     const g = await gerarParcelasMensais(agora.getMonth() + 1, agora.getFullYear());
     if (g.criadas > 0) console.log(`🧾 ${g.criadas} parcela(s) de aluguel gerada(s) para ${agora.getMonth() + 1}/${agora.getFullYear()}`);
+
+    // 4) RETENÇÃO DO LOG: o log de atividades só cresce; mantém ~1 ano de histórico
+    //    para não inflar o banco indefinidamente.
+    const logDel = await pool.query(
+      "DELETE FROM log_atividades WHERE created_at < NOW() - INTERVAL '12 months' RETURNING id"
+    );
+    if (logDel.rowCount > 0) console.log(`🧹 ${logDel.rowCount} registro(s) antigo(s) de log removido(s)`);
   } catch (err) {
     console.error('Erro ao sincronizar vencidos:', err.message);
   }
@@ -1166,6 +1173,18 @@ app.put('/api/contratos/:id', authenticateToken, upload.single('arquivo_pdf'), [
           await pool.query("UPDATE imoveis SET status='vago' WHERE id=$1", [imovel_id]);
         }
       }
+    }
+
+    // Se o valor do contrato mudou e ele continua ativo, propaga para as parcelas
+    // futuras ainda não pagas (mês corrente em diante) — mesma lógica do reajuste,
+    // evitando o contrato dizer um valor e as parcelas pendentes outro.
+    if (status === 'ativo' && parseFloat(valor) !== parseFloat(contratoAntes.valor)) {
+      await pool.query(
+        `UPDATE pagamentos SET valor_aluguel=$1, updated_at=NOW()
+         WHERE contrato_id=$2 AND status IN ('pendente','atrasado')
+           AND data_vencimento >= date_trunc('month', CURRENT_DATE)`,
+        [valor, id]
+      );
     }
 
     await logAtividade(req.user.id, 'editar_contrato', 'contratos', parseInt(id), null, req.ip);
