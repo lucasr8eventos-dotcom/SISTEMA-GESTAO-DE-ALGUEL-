@@ -11,7 +11,7 @@ const IMOVEL_INI = {
 };
 const INQUILINO_INI = { nome: '', cpf_cnpj: '', telefone: '', email: '', endereco: '', observacoes: '' };
 const CONTRATO_INI = {
-  data_inicio: '', data_fim: '', valor: '', garantia: 'fiador', renovacao_automatica: true, observacoes: ''
+  data_inicio: '', data_fim: '', valor: '', garantia: 'fiador', renovacao_automatica: false, observacoes: ''
 };
 
 const ETAPAS = ['Imóvel', 'Inquilino', 'Contrato', 'Revisão'];

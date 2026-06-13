@@ -411,18 +411,29 @@ export default function Pagamentos() {
 
   // Resume uma lista de pagamentos (usado para os cards do mês e para o
   // "Resumo do filtro aplicado").
+  // "Recebido de aluguel" = caixa recebido MENOS encargos (juros/multa), pra
+  // não inflar a receita de aluguel. assumeCheio: parcela 'pago' sem valor
+  // lançado assume o próprio aluguel.
+  const recebidoAluguel = (p, assumeCheio) => {
+    const temValor = p.valor_recebido != null && p.valor_recebido !== '';
+    const bruto = temValor ? parseFloat(p.valor_recebido) : (assumeCheio ? parseFloat(p.valor_aluguel || 0) : 0);
+    const encargos = parseFloat(p.juros || 0) + parseFloat(p.multa || 0);
+    return Math.max(0, bruto - encargos);
+  };
+
   const resumir = (lista) => {
     const counts = { pago: 0, pendente: 0, atrasado: 0, parcial: 0 };
-    let totalReceber = 0, totalRecebido = 0;
+    let totalReceber = 0, totalRecebido = 0, totalAberto = 0;
     lista.forEach((p) => {
       counts[p.status] = (counts[p.status] || 0) + 1;
       totalReceber += parseFloat(p.valor_aluguel || 0);
-      if (p.status === 'pago') totalRecebido += parseFloat(p.valor_recebido || p.valor_aluguel || 0);
-      else if (p.status === 'parcial') totalRecebido += parseFloat(p.valor_recebido || 0);
+      totalAberto += faltaReceber(p); // o que realmente falta (0 se pago, etc.)
+      if (p.status === 'pago') totalRecebido += recebidoAluguel(p, true);
+      else if (p.status === 'parcial') totalRecebido += recebidoAluguel(p, false);
     });
     const totalParcial = lista.filter((p) => p.status === 'parcial').reduce((s, p) => s + parseFloat(p.valor_aluguel || 0), 0);
-    const pagoParcial = lista.filter((p) => p.status === 'parcial').reduce((s, p) => s + parseFloat(p.valor_recebido || 0), 0);
-    return { counts, totalReceber, totalRecebido, totalParcial, pagoParcial };
+    const pagoParcial = lista.filter((p) => p.status === 'parcial').reduce((s, p) => s + recebidoAluguel(p, false), 0);
+    return { counts, totalReceber, totalRecebido, totalAberto, totalParcial, pagoParcial };
   };
 
   // ===== Filtros client-side (afetam SOMENTE a tabela) =====
@@ -538,7 +549,7 @@ export default function Pagamentos() {
         />
         <MetricCard
           label="Em Aberto"
-          value={formatMoeda(stats.totalReceber - stats.totalRecebido)}
+          value={formatMoeda(stats.totalAberto)}
           color="var(--danger)"
           active={filtroStatus === 'pendente'}
           onClick={() => setFiltroStatus(filtroStatus === 'pendente' ? '' : 'pendente')}
@@ -614,7 +625,7 @@ export default function Pagamentos() {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, fontSize: 14 }}>
             <div><span style={{ color: 'var(--gray-500)' }}>Total: </span><strong>{formatMoeda(statsFiltro.totalReceber)}</strong></div>
             <div><span style={{ color: 'var(--gray-500)' }}>Recebido: </span><strong style={{ color: 'var(--success)' }}>{formatMoeda(statsFiltro.totalRecebido)}</strong></div>
-            <div><span style={{ color: 'var(--gray-500)' }}>Em aberto: </span><strong style={{ color: 'var(--danger)' }}>{formatMoeda(statsFiltro.totalReceber - statsFiltro.totalRecebido)}</strong></div>
+            <div><span style={{ color: 'var(--gray-500)' }}>Em aberto: </span><strong style={{ color: 'var(--danger)' }}>{formatMoeda(statsFiltro.totalAberto)}</strong></div>
             <div><span style={{ color: 'var(--gray-500)' }}>Atrasados: </span><strong style={{ color: 'var(--danger)' }}>{statsFiltro.counts.atrasado}</strong></div>
           </div>
           <div className="form-hint" style={{ marginTop: 6 }}>Os cards acima mostram sempre o total geral do período.</div>
