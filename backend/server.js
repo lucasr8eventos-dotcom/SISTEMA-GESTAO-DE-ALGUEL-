@@ -1041,8 +1041,9 @@ app.post('/api/contratos', authenticateToken, upload.single('arquivo_pdf'), [
   try {
     const { imovel_id, inquilino_id, data_inicio, data_fim, valor, garantia, status, observacoes } = req.body;
     const arquivo_pdf = req.file ? req.file.filename : null;
-    // multipart/form-data envia booleanos como string
-    const renovacaoAuto = !(req.body.renovacao_automatica === 'false' || req.body.renovacao_automatica === false);
+    // multipart/form-data envia booleanos como string. Padrão: NÃO renovar
+    // (opt-in) — evita prorrogar contrato e manter imóvel "alugado" sem querer.
+    const renovacaoAuto = (req.body.renovacao_automatica === 'true' || req.body.renovacao_automatica === true);
 
     if (new Date(data_fim) <= new Date(data_inicio)) {
       return res.status(400).json({ error: 'A data de fim deve ser posterior à data de início' });
@@ -1124,7 +1125,7 @@ app.put('/api/contratos/:id', authenticateToken, upload.single('arquivo_pdf'), [
     // multipart/form-data envia booleanos como string; ausente mantém o valor atual
     const renovacaoAuto = req.body.renovacao_automatica === undefined
       ? contratoAntes.renovacao_automatica
-      : !(req.body.renovacao_automatica === 'false' || req.body.renovacao_automatica === false);
+      : (req.body.renovacao_automatica === 'true' || req.body.renovacao_automatica === true);
 
     const result = await pool.query(
       `UPDATE contratos SET imovel_id=$1, inquilino_id=$2, data_inicio=$3, data_fim=$4,
@@ -2049,8 +2050,39 @@ app.delete('/api/despesas/:id', authenticateToken, authorizeAdmin, [
       return res.json({ message: 'Série de despesas excluída com sucesso' });
     }
 
-    await pool.query('DELETE FROM despesas WHERE id=$1', [id]);
-    await logAtividade(req.user.id, 'excluir_despesa', 'despesas', parseInt(id), null, req.ip);
+    const idInt = parseInt(id, 10);
+    const ehRaiz = recorrenciaId != null && recorrenciaId === despesa.rows[0].id;
+
+    if (ehRaiz) {
+      // É a raiz da série: transfere a série para a próxima ocorrência ANTES de
+      // excluir. Sem isso, a FK ON DELETE SET NULL desvincularia as demais
+      // parcelas, quebrando o agrupamento da recorrência.
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const proxima = await client.query(
+          'SELECT id FROM despesas WHERE recorrencia_id=$1 AND id<>$1 ORDER BY vencimento, id LIMIT 1',
+          [idInt]
+        );
+        if (proxima.rows.length > 0) {
+          const novaRaiz = proxima.rows[0].id;
+          // Reaponta toda a série (menos a nova raiz) para a nova raiz...
+          await client.query('UPDATE despesas SET recorrencia_id=$1 WHERE recorrencia_id=$2 AND id<>$1', [novaRaiz, idInt]);
+          // ...e a nova raiz passa a referenciar a si mesma.
+          await client.query('UPDATE despesas SET recorrencia_id=$1 WHERE id=$1', [novaRaiz]);
+        }
+        await client.query('DELETE FROM despesas WHERE id=$1', [idInt]);
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+    } else {
+      await pool.query('DELETE FROM despesas WHERE id=$1', [id]);
+    }
+    await logAtividade(req.user.id, 'excluir_despesa', 'despesas', idInt, null, req.ip);
 
     // Informa ao frontend se a despesa fazia parte de uma série
     res.json({
@@ -2426,7 +2458,10 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
       pool.query(`
         SELECT
           SUM(valor_aluguel) as total_receber,
-          SUM(CASE WHEN status='pago' OR status='parcial' THEN COALESCE(valor_recebido, 0) ELSE 0 END) as total_recebido,
+          SUM(CASE WHEN status IN ('pago','parcial')
+                   THEN GREATEST(COALESCE(valor_recebido,0) - COALESCE(juros,0) - COALESCE(multa,0), 0)
+                   ELSE 0 END) as total_recebido,
+          SUM(GREATEST(valor_aluguel + COALESCE(juros,0) + COALESCE(multa,0) - COALESCE(desconto,0) - COALESCE(valor_recebido,0), 0)) as total_aberto,
           COUNT(CASE WHEN status='atrasado' THEN 1 END) as total_atrasados
         FROM pagamentos WHERE mes=$1 AND ano=$2
       `, [mesAtual, anoAtual]),
@@ -2453,6 +2488,7 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
 
     const totalReceber = parseFloat(pagamentosMes.rows[0]?.total_receber || 0);
     const totalRecebido = parseFloat(pagamentosMes.rows[0]?.total_recebido || 0);
+    const totalAberto = parseFloat(pagamentosMes.rows[0]?.total_aberto || 0);
 
     res.json({
       totalImoveis: parseInt(totalImoveis.rows[0].total),
@@ -2462,7 +2498,7 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
       imoveisManutencao: parseInt(imoveisPorStatus.rows.find(s => s.status === 'manutencao')?.total || 0),
       totalReceber,
       totalRecebido,
-      valorAberto: Math.max(0, totalReceber - totalRecebido),
+      valorAberto: totalAberto,
       alugueisAtrasados: parseInt(pagamentosMes.rows[0]?.total_atrasados || 0),
       despesasMes: parseFloat(despesasMes.rows[0]?.total || 0),
       contratosVencendo: parseInt(contratosVencendo.rows[0].total),
@@ -2486,7 +2522,9 @@ app.get('/api/dashboard/evolucao', authenticateToken, async (req, res) => {
       SELECT
         mes, ano,
         SUM(valor_aluguel) as total_receber,
-        SUM(CASE WHEN status IN ('pago','parcial') THEN COALESCE(valor_recebido,0) ELSE 0 END) as total_recebido
+        SUM(CASE WHEN status IN ('pago','parcial')
+                 THEN GREATEST(COALESCE(valor_recebido,0) - COALESCE(juros,0) - COALESCE(multa,0), 0)
+                 ELSE 0 END) as total_recebido
       FROM pagamentos
       WHERE (ano * 12 + mes) >= ((EXTRACT(YEAR FROM NOW())::int * 12 + EXTRACT(MONTH FROM NOW())::int) - 5)
       GROUP BY mes, ano
@@ -3343,9 +3381,17 @@ app.post('/api/recibos/logo', authenticateToken, upload.single('logo'), (req, re
 // ---- Próximo número de recibo ----
 app.get('/api/recibos/proximo-numero', authenticateToken, async (req, res) => {
   try {
-    const r = await pool.query('SELECT COALESCE(MAX(numero), $1) AS max FROM recibos', [RECIBO_NUMERO_INICIAL - 1]);
-    res.json({ proximo: parseInt(r.rows[0].max, 10) + 1 });
-  } catch (e) { res.status(500).json({ error: 'Erro ao obter número' }); }
+    // Espia o próximo valor da sequência SEM consumi-lo (numeração perene).
+    const r = await pool.query('SELECT last_value, is_called FROM recibos_numero_seq');
+    const lv = parseInt(r.rows[0].last_value, 10);
+    res.json({ proximo: r.rows[0].is_called ? lv + 1 : lv });
+  } catch (e) {
+    // Fallback se a sequência ainda não existir: usa MAX(numero)+1.
+    try {
+      const r2 = await pool.query('SELECT COALESCE(MAX(numero), $1) AS max FROM recibos', [RECIBO_NUMERO_INICIAL - 1]);
+      res.json({ proximo: parseInt(r2.rows[0].max, 10) + 1 });
+    } catch (_) { res.status(500).json({ error: 'Erro ao obter número' }); }
+  }
 });
 
 // ---- Listar recibos gerados ----
@@ -3411,11 +3457,11 @@ app.post('/api/recibos', authenticateToken, [
     }
     if (!pag.nome) { await client.query('ROLLBACK'); return res.status(422).json({ error: 'Informe quem está pagando' }); }
 
-    // Trava de concorrência: serializa a alocação do número entre requisições
-    // simultâneas (a trava é liberada automaticamente no COMMIT/ROLLBACK).
-    await client.query('SELECT pg_advisory_xact_lock(916273)');
-    const numQ = await client.query('SELECT COALESCE(MAX(numero), $1) AS max FROM recibos', [RECIBO_NUMERO_INICIAL - 1]);
-    const numero = parseInt(numQ.rows[0].max, 10) + 1;
+    // Numeração PERENE via sequência: atômica (dispensa trava manual) e nunca
+    // reutiliza um número já emitido, mesmo que o recibo de maior número seja
+    // excluído depois. Gaps (em caso de rollback) são aceitáveis; reuso não.
+    const numQ = await client.query("SELECT nextval('recibos_numero_seq') AS n");
+    const numero = parseInt(numQ.rows[0].n, 10);
     const extenso = valorPorExtenso(b.valor);
     const comCanhoto = b.com_canhoto === undefined ? true : !!b.com_canhoto;
 
@@ -3658,8 +3704,11 @@ async function runMigrations() {
       END $$;
     `);
 
-    // Renovação automática anual de contratos
-    await pool.query(`ALTER TABLE contratos ADD COLUMN IF NOT EXISTS renovacao_automatica BOOLEAN NOT NULL DEFAULT true`);
+    // Renovação automática anual de contratos (opt-in). Padrão passou a ser
+    // false para não prorrogar contratos silenciosamente. Não altera os valores
+    // já gravados em contratos existentes — apenas o padrão de novos contratos.
+    await pool.query(`ALTER TABLE contratos ADD COLUMN IF NOT EXISTS renovacao_automatica BOOLEAN NOT NULL DEFAULT false`);
+    await pool.query(`ALTER TABLE contratos ALTER COLUMN renovacao_automatica SET DEFAULT false`);
 
     // Pagamentos — encargos no "informar pagamento" (igual Contas a Pagar)
     await pool.query(`ALTER TABLE pagamentos ADD COLUMN IF NOT EXISTS juros DECIMAL(10,2) DEFAULT 0`);
@@ -3744,9 +3793,62 @@ async function runMigrations() {
       console.warn('⚠️  Não foi possível criar índice único de recibos.numero:', e.message);
     }
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_recibos_created ON recibos(created_at)`);
+
+    // Sequência PERENE de numeração de recibos: é atômica e nunca regride,
+    // mesmo que o recibo de maior número seja excluído depois (evita reutilizar
+    // um número já emitido — exigência fiscal). Criada UMA única vez, começando
+    // logo após o maior número já existente; nas bootagens seguintes é mantida.
+    await pool.query(`
+      DO $$
+      DECLARE mx INTEGER;
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_class WHERE relkind='S' AND relname='recibos_numero_seq') THEN
+          SELECT COALESCE(MAX(numero), 0) INTO mx FROM recibos;
+          EXECUTE format('CREATE SEQUENCE recibos_numero_seq START WITH %s', GREATEST(mx + 1, 1));
+        END IF;
+      END $$;
+    `);
     console.log('✅ Migrations aplicadas');
   } catch (err) {
     console.error('⚠️  Erro ao rodar migrations:', err.message);
+  }
+}
+
+// ============================================================
+// BOOTSTRAP DO ADMIN (cria o admin inicial SEM senha pública)
+// ============================================================
+// O database.sql é público, então não semeamos senha lá. Se ainda não existe
+// NENHUM admin, criamos admin@sistema.com (ou ADMIN_EMAIL) com a senha de
+// ADMIN_PASSWORD — ou, na ausência dela, uma senha ALEATÓRIA forte exibida
+// UMA única vez no log do servidor. Em bancos já existentes (que já têm admin)
+// nada é alterado.
+async function bootstrapAdmin() {
+  try {
+    const existe = await pool.query("SELECT id FROM usuarios WHERE perfil='admin' LIMIT 1");
+    if (existe.rows.length > 0) return; // já há admin — nada a fazer
+
+    const email = (process.env.ADMIN_EMAIL || 'admin@sistema.com').toLowerCase();
+    const senha = process.env.ADMIN_PASSWORD || crypto.randomBytes(9).toString('base64url');
+    const hash = await bcrypt.hash(senha, 12);
+    await pool.query(
+      `INSERT INTO usuarios (nome, email, senha, perfil, status)
+       VALUES ($1,$2,$3,'admin','ativo')
+       ON CONFLICT (email) DO NOTHING`,
+      ['Administrador', email, hash]
+    );
+    if (process.env.ADMIN_PASSWORD) {
+      console.log(`👤 Admin inicial criado: ${email} (senha definida via ADMIN_PASSWORD)`);
+    } else {
+      console.log('============================================================');
+      console.log('👤  ADMIN INICIAL CRIADO');
+      console.log(`    Email: ${email}`);
+      console.log(`    Senha: ${senha}`);
+      console.log('    ⚠️  Anote esta senha e troque-a no primeiro acesso.');
+      console.log('        Ela NÃO será exibida novamente.');
+      console.log('============================================================');
+    }
+  } catch (err) {
+    console.error('⚠️  Erro ao criar admin inicial:', err.message);
   }
 }
 
@@ -3759,6 +3861,7 @@ const server = app.listen(PORT, async () => {
   console.log(`📍 Ambiente: ${process.env.NODE_ENV || 'development'}`);
   await runSchemaInit();
   await runMigrations();
+  await bootstrapAdmin();
   sincronizarStatusVencidos();
 });
 
