@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Modal from '../../components/Modal';
 import { MoneyInput, CpfCnpjInput, PhoneInput } from '../../components/MaskedInput';
-import { imoveisService, inquilinosService, contratosService } from '../../services/api';
+import { imoveisService } from '../../services/api';
 import { formatMoeda, formatData } from '../../utils/format';
 
 const IMOVEL_INI = {
@@ -25,10 +25,11 @@ export default function CadastroCompleto({ isOpen, onClose, onDone, toast, codig
   const [inquilino, setInquilino] = useState(INQUILINO_INI);
   const [contrato, setContrato] = useState(CONTRATO_INI);
   const [salvando, setSalvando] = useState(false);
+  const [erroSalvar, setErroSalvar] = useState(''); // banner de erro fixo no modal
 
   useEffect(() => {
     if (isOpen) {
-      setStep(1); setVincular(true);
+      setStep(1); setVincular(true); setErroSalvar('');
       // Já sugere o próximo código (IM###), mas continua editável
       setImovel({ ...IMOVEL_INI, codigo: codigoSugerido || '' });
       setInquilino(INQUILINO_INI); setContrato(CONTRATO_INI);
@@ -64,6 +65,7 @@ export default function CadastroCompleto({ isOpen, onClose, onDone, toast, codig
   };
 
   const avancar = () => {
+    setErroSalvar('');
     const erro = validarStep();
     if (erro) { toast.error(erro); return; }
     // ao entrar no contrato, pré-preenche o valor com o do imóvel
@@ -74,36 +76,31 @@ export default function CadastroCompleto({ isOpen, onClose, onDone, toast, codig
   };
 
   const salvar = async () => {
+    setErroSalvar('');
     setSalvando(true);
     try {
-      // 1) Imóvel (status fica como escolhido; o contrato, se houver, marca 'alugado')
-      const imRes = await imoveisService.criar(imovel);
-      const imovelId = imRes.data.id;
-
+      // Uma única chamada ATÔMICA no backend: imóvel + inquilino + contrato são
+      // gravados na mesma transação. Se qualquer etapa falhar, NADA é gravado
+      // (sem imóvel órfão). Antes eram 3 chamadas sequenciais.
+      const payload = { imovel, vincular };
       if (vincular) {
-        // 2) Inquilino
-        const inqRes = await inquilinosService.criar(inquilino);
-        const inquilinoId = inqRes.data.id;
-        // 3) Contrato (multipart, sem arquivo)
-        const fd = new FormData();
-        fd.append('imovel_id', imovelId);
-        fd.append('inquilino_id', inquilinoId);
-        fd.append('data_inicio', contrato.data_inicio);
-        fd.append('data_fim', contrato.data_fim);
-        fd.append('valor', contrato.valor);
-        fd.append('garantia', contrato.garantia);
-        fd.append('status', 'ativo');
-        fd.append('renovacao_automatica', contrato.renovacao_automatica);
-        if (contrato.observacoes) fd.append('observacoes', contrato.observacoes);
-        await contratosService.criar(fd);
-        toast.success('Imóvel, inquilino e contrato cadastrados!');
+        payload.inquilino = inquilino;
+        payload.contrato = { ...contrato, status: 'ativo' };
+      }
+      const res = await imoveisService.cadastroCompleto(payload);
+      if (vincular) {
+        toast.success(res.data?.inquilino_reaproveitado
+          ? 'Imóvel e contrato cadastrados! Já existia um inquilino com este CPF/CNPJ — ele foi reaproveitado.'
+          : 'Imóvel, inquilino e contrato cadastrados!');
       } else {
         toast.success('Imóvel cadastrado!');
       }
       onDone();
       onClose();
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Erro ao salvar. Verifique os dados e tente novamente.');
+      const msg = err.response?.data?.error || 'Erro ao salvar. Verifique os dados e tente novamente.';
+      setErroSalvar(msg);   // banner fixo no modal (não depende do toast)
+      toast.error(msg);
     } finally {
       setSalvando(false);
     }
@@ -129,6 +126,18 @@ export default function CadastroCompleto({ isOpen, onClose, onDone, toast, codig
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Cadastro completo" size="lg" footer={footer}>
+      {/* Banner de erro fixo — mostra o motivo da falha sem depender do toast */}
+      {erroSalvar && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, padding: '10px 14px',
+          background: 'var(--danger-light, #fde8e8)', border: '1px solid var(--danger)',
+          borderRadius: 'var(--radius)', color: 'var(--danger-dark, #9b1c1c)', fontSize: 13, fontWeight: 500
+        }}>
+          <span style={{ fontSize: 16 }}>✕</span>
+          <span>{erroSalvar} <span style={{ fontWeight: 400 }}>— nenhum dado foi gravado.</span></span>
+        </div>
+      )}
+
       {/* Stepper */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 18 }}>
         {ETAPAS.map((nome, i) => {
