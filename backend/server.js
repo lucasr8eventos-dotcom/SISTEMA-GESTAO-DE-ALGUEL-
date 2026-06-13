@@ -658,6 +658,120 @@ app.post('/api/imoveis', authenticateToken, [
   }
 });
 
+// ===== Cadastro completo: Imóvel + Inquilino + Contrato numa única transação =====
+// Tudo-ou-nada: se QUALQUER etapa falhar, faz ROLLBACK e nada é gravado (não
+// deixa imóvel órfão). Se o CPF/CNPJ informado já existir, reaproveita o
+// inquilino em vez de falhar. Retorna mensagens de erro claras para a tela.
+app.post('/api/imoveis/cadastro-completo', authenticateToken, async (req, res) => {
+  const { imovel = {}, inquilino = {}, contrato = {}, vincular } = req.body || {};
+  const tipos = ['casa', 'apartamento', 'comercial', 'terreno', 'galpao'];
+  const garantias = ['caucao', 'fiador', 'seguro', 'sem', 'outro'];
+  const statusImovel = ['alugado', 'vago', 'encerrado', 'negociacao', 'manutencao'];
+
+  // ---- Validação (espelha as regras das rotas individuais) ----
+  const erros = [];
+  if (!imovel.codigo || !String(imovel.codigo).trim()) erros.push('Informe o código do imóvel');
+  if (!tipos.includes(imovel.tipo)) erros.push('Tipo de imóvel inválido');
+  if (!imovel.endereco || String(imovel.endereco).trim().length < 5) erros.push('Endereço muito curto (mín. 5 caracteres)');
+  if (imovel.valor_sem_desconto === '' || imovel.valor_sem_desconto == null || isNaN(parseFloat(imovel.valor_sem_desconto))) erros.push('Informe o valor do aluguel');
+  const dia = parseInt(imovel.dia_vencimento, 10);
+  if (!(dia >= 1 && dia <= 31)) erros.push('Dia de vencimento inválido (1 a 31)');
+  if (imovel.status && !statusImovel.includes(imovel.status)) erros.push('Situação do imóvel inválida');
+  if (imovel.valor_com_desconto && parseFloat(imovel.valor_com_desconto) > parseFloat(imovel.valor_sem_desconto)) {
+    erros.push('Valor com desconto não pode ser maior que o valor sem desconto');
+  }
+  if (vincular) {
+    if (!inquilino.nome || !String(inquilino.nome).trim()) erros.push('Informe o nome do inquilino');
+    if (String(inquilino.cpf_cnpj || '').replace(/\D/g, '').length < 11) erros.push('CPF/CNPJ do inquilino inválido');
+    if (!inquilino.telefone || !String(inquilino.telefone).trim()) erros.push('Informe o telefone do inquilino');
+    if (!contrato.data_inicio || !contrato.data_fim) erros.push('Informe início e fim do contrato');
+    if (contrato.data_inicio && contrato.data_fim && new Date(contrato.data_fim) <= new Date(contrato.data_inicio)) erros.push('A data de fim do contrato deve ser posterior ao início');
+    if (contrato.valor === '' || contrato.valor == null || isNaN(parseFloat(contrato.valor))) erros.push('Informe o valor mensal do contrato');
+    if (contrato.garantia && !garantias.includes(contrato.garantia)) erros.push('Tipo de garantia inválido');
+  }
+  if (erros.length) return res.status(422).json({ error: erros[0], detalhes: erros });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Código único?
+    const dupCod = await client.query('SELECT id FROM imoveis WHERE codigo=$1', [String(imovel.codigo).trim()]);
+    if (dupCod.rows.length) { await client.query('ROLLBACK'); return res.status(400).json({ error: `Código "${String(imovel.codigo).trim()}" já cadastrado em outro imóvel` }); }
+
+    // 1) Imóvel
+    const imRes = await client.query(
+      `INSERT INTO imoveis (codigo, tipo, endereco, valor_com_desconto, valor_sem_desconto,
+        dia_vencimento, status, numero_iptu, matricula, conta_agua, conta_energia, observacoes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [String(imovel.codigo).trim(), imovel.tipo, imovel.endereco, imovel.valor_com_desconto || null, imovel.valor_sem_desconto,
+       dia, imovel.status || 'vago', imovel.numero_iptu || null, imovel.matricula || null,
+       imovel.conta_agua || null, imovel.conta_energia || null, imovel.observacoes || null]
+    );
+    const novoImovel = imRes.rows[0];
+
+    let inquilinoId = null, inquilinoReuso = false, contratoRow = null;
+
+    if (vincular) {
+      // 2) Inquilino — reaproveita se o CPF/CNPJ já existir (mesmo critério das rotas)
+      const cpfDigits = String(inquilino.cpf_cnpj).replace(/\D/g, '');
+      const existInq = await client.query(
+        "SELECT id FROM inquilinos WHERE REGEXP_REPLACE(cpf_cnpj, '[^0-9]', '', 'g') = $1",
+        [cpfDigits]
+      );
+      if (existInq.rows.length) {
+        inquilinoId = existInq.rows[0].id;
+        inquilinoReuso = true;
+      } else {
+        const inqRes = await client.query(
+          'INSERT INTO inquilinos (nome, cpf_cnpj, telefone, email, endereco, observacoes) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+          [inquilino.nome, inquilino.cpf_cnpj, inquilino.telefone, inquilino.email || null, inquilino.endereco || null, inquilino.observacoes || null]
+        );
+        inquilinoId = inqRes.rows[0].id;
+      }
+
+      // 3) Contrato ativo — imóvel é novo, então não há sobreposição possível
+      const renovacaoAuto = (contrato.renovacao_automatica === true || contrato.renovacao_automatica === 'true');
+      const cRes = await client.query(
+        `INSERT INTO contratos (imovel_id, inquilino_id, data_inicio, data_fim, valor, garantia, status, renovacao_automatica, observacoes)
+         VALUES ($1,$2,$3,$4,$5,$6,'ativo',$7,$8) RETURNING *`,
+        [novoImovel.id, inquilinoId, contrato.data_inicio, contrato.data_fim, contrato.valor, contrato.garantia || 'sem', renovacaoAuto, contrato.observacoes || null]
+      );
+      contratoRow = cRes.rows[0];
+
+      // Imóvel passa a 'alugado'
+      await client.query("UPDATE imoveis SET status='alugado' WHERE id=$1", [novoImovel.id]);
+      novoImovel.status = 'alugado';
+    }
+
+    await client.query('COMMIT');
+
+    // Pós-commit (idempotente): gera a parcela do mês corrente para o novo contrato
+    if (vincular) {
+      const agora = new Date();
+      await gerarParcelasMensais(agora.getMonth() + 1, agora.getFullYear()).catch(() => {});
+    }
+    await logAtividade(req.user.id, 'cadastro_completo', 'imoveis', novoImovel.id,
+      vincular ? 'imóvel+inquilino+contrato' : 'imóvel', req.ip);
+
+    res.status(201).json({
+      imovel: novoImovel,
+      inquilino_id: inquilinoId,
+      inquilino_reaproveitado: inquilinoReuso,
+      contrato: contratoRow
+    });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (error.code === '23505') {
+      return res.status(400).json({ error: 'Registro duplicado (código de imóvel ou CPF/CNPJ já cadastrado). Nada foi gravado.' });
+    }
+    console.error('Erro no cadastro completo:', error.message);
+    res.status(500).json({ error: 'Erro ao salvar o cadastro. Nada foi gravado.' });
+  } finally {
+    client.release();
+  }
+});
+
 app.put('/api/imoveis/:id', authenticateToken, [
   param('id').isInt({ min: 1 }),
   body('codigo').trim().isLength({ min: 1, max: 100 }),

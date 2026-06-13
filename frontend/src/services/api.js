@@ -46,6 +46,8 @@ export const imoveisService = {
   listar: (params) => api.get('/imoveis', { params }),
   buscarPorId: (id) => api.get(`/imoveis/${id}`),
   criar: (dados) => api.post('/imoveis', dados),
+  // Cadastro completo (imóvel + inquilino + contrato) atômico no backend
+  cadastroCompleto: (dados) => api.post('/imoveis/cadastro-completo', dados),
   atualizar: (id, dados) => api.put(`/imoveis/${id}`, dados),
   excluir: (id) => api.delete(`/imoveis/${id}`),
   historico: (id) => api.get(`/imoveis/${id}/historico`),
