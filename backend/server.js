@@ -1949,12 +1949,12 @@ app.get('/api/despesas', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/despesas', authenticateToken, [
-  body('imovel_id').optional({ values: 'falsy' }).isInt({ min: 1 }),
+  body('imovel_id').optional({ values: 'falsy' }).isInt({ min: 1 }).withMessage('Imóvel inválido'),
   body('tipo').trim().notEmpty().withMessage('Categoria é obrigatória'),
-  body('valor').isFloat({ min: 0 }),
-  body('vencimento').isDate(),
-  body('status').isIn(['pago', 'pendente', 'atrasado', 'parcial']),
-  body('recorrencia_meses').optional({ values: 'falsy' }).isInt({ min: 1, max: 120 })
+  body('valor').isFloat({ min: 0 }).withMessage('Informe um valor válido'),
+  body('vencimento').isDate().withMessage('Informe uma data de vencimento válida'),
+  body('status').isIn(['pago', 'pendente', 'atrasado', 'parcial']).withMessage('Status inválido'),
+  body('recorrencia_meses').optional({ values: 'falsy' }).isInt({ min: 1, max: 120 }).withMessage('Número de meses inválido (1 a 120)')
 ], validate, async (req, res) => {
   const client = await pool.connect();
   try {
@@ -2012,11 +2012,11 @@ app.post('/api/despesas', authenticateToken, [
 
 app.put('/api/despesas/:id', authenticateToken, [
   param('id').isInt({ min: 1 }),
-  body('imovel_id').optional({ values: 'falsy' }).isInt({ min: 1 }),
-  body('tipo').trim().notEmpty(),
-  body('valor').isFloat({ min: 0 }),
-  body('vencimento').isDate(),
-  body('status').isIn(['pago', 'pendente', 'atrasado', 'parcial'])
+  body('imovel_id').optional({ values: 'falsy' }).isInt({ min: 1 }).withMessage('Imóvel inválido'),
+  body('tipo').trim().notEmpty().withMessage('Categoria é obrigatória'),
+  body('valor').isFloat({ min: 0 }).withMessage('Informe um valor válido'),
+  body('vencimento').isDate().withMessage('Informe uma data de vencimento válida'),
+  body('status').isIn(['pago', 'pendente', 'atrasado', 'parcial']).withMessage('Status inválido')
 ], validate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -2131,6 +2131,22 @@ app.post('/api/despesa-tipos', authenticateToken, [
     );
     res.status(201).json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: 'Erro ao salvar categoria' }); }
+});
+
+// Renomear categoria: altera apenas o NOME exibido. O código (slug) é mantido
+// estável de propósito, para não quebrar as contas já lançadas que o referenciam.
+app.put('/api/despesa-tipos/:id', authenticateToken, [
+  param('id').isInt({ min: 1 }),
+  body('nome').trim().notEmpty().withMessage('Informe o nome da categoria')
+], validate, async (req, res) => {
+  try {
+    const r = await pool.query(
+      'UPDATE despesa_tipos SET nome=$1 WHERE id=$2 RETURNING *',
+      [req.body.nome.trim(), req.params.id]
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Categoria não encontrada' });
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: 'Erro ao renomear categoria' }); }
 });
 
 app.delete('/api/despesa-tipos/:id', authenticateToken, [param('id').isInt({ min: 1 })], validate, async (req, res) => {

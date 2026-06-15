@@ -66,6 +66,10 @@ export function valorPorExtenso(valorNum) {
   return partes.join(' e ');
 }
 
+// Capitaliza apenas a 1ª letra da frase (o resto fica minúsculo, como no
+// padrão do português). Evita "Reais E Cinquenta" do text-transform: capitalize.
+export const capitalizar = (s = '') => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
 export const FORMAS_PAGAMENTO_RECIBO = [
   { value: 'pix', label: 'PIX' },
   { value: 'dinheiro', label: 'Dinheiro' },
