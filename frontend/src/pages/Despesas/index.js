@@ -168,7 +168,10 @@ export default function Despesas() {
       setModalAberto(false);
       fetchDespesas();
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Erro ao salvar conta');
+      // Mostra a mensagem do campo específico (ex.: "Informe um valor válido")
+      // em vez do genérico "Dados inválidos".
+      const det = err.response?.data?.detalhes?.[0]?.msg;
+      toast.error(det || err.response?.data?.error || 'Erro ao salvar conta');
     } finally {
       setSalvando(false);
     }
@@ -622,15 +625,22 @@ export default function Despesas() {
                 <strong>{formatMoeda(pagTotalDevido)}</strong>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ color: 'var(--gray-500)' }}>{pagSaldo > 0.005 ? 'Ficará em aberto' : 'Saldo'}</div>
-                <strong style={{ color: pagSaldo > 0.005 ? 'var(--warning)' : 'var(--success)' }}>
-                  {formatMoeda(Math.max(0, pagSaldo))}
+                <div style={{ color: 'var(--gray-500)' }}>
+                  {pagSaldo > 0.005 ? 'Ficará em aberto' : pagSaldo < -0.005 ? 'Pago a mais' : 'Saldo'}
+                </div>
+                <strong style={{ color: pagSaldo > 0.005 ? 'var(--warning)' : pagSaldo < -0.005 ? 'var(--danger)' : 'var(--success)' }}>
+                  {formatMoeda(Math.abs(pagSaldo) < 0.005 ? 0 : Math.abs(pagSaldo))}
                 </strong>
               </div>
             </div>
             {pagSaldo > 0.005 && (
               <div className="form-hint" style={{ marginTop: 6 }}>
                 Pagamento <strong>parcial</strong>: a conta ficará como "Parcial" e o restante continua em aberto.
+              </div>
+            )}
+            {pagSaldo < -0.005 && (
+              <div className="form-hint" style={{ marginTop: 6, color: 'var(--danger)' }}>
+                ⚠ O valor informado é <strong>{formatMoeda(-pagSaldo)}</strong> maior que o total devido (com encargos). Confira antes de confirmar.
               </div>
             )}
           </>
@@ -672,8 +682,24 @@ function CategoriaManager({ isOpen, onClose, tipos, onChange, toast }) {
   const [nova, setNova] = useState('');
   const [salvando, setSalvando] = useState(false);
   const [confirm, setConfirm] = useState(null);
+  const [editId, setEditId] = useState(null);
+  const [editNome, setEditNome] = useState('');
 
-  useEffect(() => { if (isOpen) setNova(''); }, [isOpen]);
+  useEffect(() => { if (isOpen) { setNova(''); setEditId(null); setEditNome(''); } }, [isOpen]);
+
+  const iniciarEdicao = (t) => { setEditId(t.id); setEditNome(t.nome); };
+  const cancelarEdicao = () => { setEditId(null); setEditNome(''); };
+  const renomear = async () => {
+    if (!editNome.trim()) { toast.error('Informe o nome da categoria'); return; }
+    try {
+      await despesaTiposService.atualizar(editId, editNome.trim());
+      cancelarEdicao();
+      await onChange();
+      toast.success('Categoria renomeada!');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erro ao renomear categoria');
+    }
+  };
 
   const adicionar = async (e) => {
     e?.preventDefault();
@@ -723,10 +749,35 @@ function CategoriaManager({ isOpen, onClose, tipos, onChange, toast }) {
               <tbody>
                 {tipos.map((t) => (
                   <tr key={t.id}>
-                    <td>{t.nome}</td>
-                    <td>
-                      <button className="btn btn-outline-danger btn-sm btn-icon" onClick={() => setConfirm(t)} title="Excluir"><Trash2 size={14} /></button>
-                    </td>
+                    {editId === t.id ? (
+                      <>
+                        <td>
+                          <input
+                            className="form-control"
+                            value={editNome}
+                            autoFocus
+                            onChange={(e) => setEditNome(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') renomear(); if (e.key === 'Escape') cancelarEdicao(); }}
+                          />
+                        </td>
+                        <td>
+                          <div className="table-actions">
+                            <button className="btn btn-primary btn-sm" onClick={renomear}>Salvar</button>
+                            <button className="btn btn-ghost btn-sm" onClick={cancelarEdicao}>Cancelar</button>
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td>{t.nome}</td>
+                        <td>
+                          <div className="table-actions">
+                            <button className="btn btn-ghost btn-sm btn-icon" onClick={() => iniciarEdicao(t)} title="Renomear"><Pencil size={14} /></button>
+                            <button className="btn btn-outline-danger btn-sm btn-icon" onClick={() => setConfirm(t)} title="Excluir"><Trash2 size={14} /></button>
+                          </div>
+                        </td>
+                      </>
+                    )}
                   </tr>
                 ))}
               </tbody>

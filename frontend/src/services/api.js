@@ -106,6 +106,7 @@ export const despesasService = {
 export const despesaTiposService = {
   listar: () => api.get('/despesa-tipos'),
   criar: (nome) => api.post('/despesa-tipos', { nome }),
+  atualizar: (id, nome) => api.put(`/despesa-tipos/${id}`, { nome }),
   excluir: (id) => api.delete(`/despesa-tipos/${id}`)
 };
 
