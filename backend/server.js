@@ -1483,8 +1483,12 @@ app.post('/api/pagamentos/:id/reabrir', authenticateToken, [
 ], validate, async (req, res) => {
   try {
     const { id } = req.params;
+    // Recalcula o status conforme o vencimento: se já passou, volta 'atrasado'
+    // (não 'pendente'), para não sumir dos filtros de atraso/inadimplência.
     const result = await pool.query(
-      `UPDATE pagamentos SET status='pendente', data_pagamento=NULL, valor_recebido=NULL,
+      `UPDATE pagamentos SET
+        status = CASE WHEN data_vencimento < CURRENT_DATE THEN 'atrasado' ELSE 'pendente' END,
+        data_pagamento=NULL, valor_recebido=NULL,
         forma_pagamento=NULL, juros=0, multa=0, desconto=0, updated_at=NOW()
        WHERE id=$1 RETURNING *`,
       [id]
@@ -1914,10 +1918,20 @@ app.put('/api/despesas/:id', authenticateToken, [
     const { id } = req.params;
     const { imovel_id, tipo, valor, vencimento, status, descricao, observacoes } = req.body;
 
+    // Se a edição reverte a conta para um estado NÃO pago, zera os dados da baixa
+    // (valor_pago/forma/encargos), evitando "pendente com valor_pago > 0".
+    const naoPago = status === 'pendente' || status === 'atrasado';
     const result = await pool.query(
       `UPDATE despesas SET imovel_id=$1, tipo=$2, valor=$3, vencimento=$4, status=$5,
-        descricao=$6, observacoes=$7, updated_at=NOW() WHERE id=$8 RETURNING *`,
-      [imovel_id || null, tipo, valor, vencimento, status, descricao, observacoes, id]
+        descricao=$6, observacoes=$7,
+        data_pagamento = CASE WHEN $9 THEN NULL ELSE data_pagamento END,
+        valor_pago     = CASE WHEN $9 THEN NULL ELSE valor_pago END,
+        forma_pagamento= CASE WHEN $9 THEN NULL ELSE forma_pagamento END,
+        juros          = CASE WHEN $9 THEN 0 ELSE juros END,
+        multa          = CASE WHEN $9 THEN 0 ELSE multa END,
+        desconto       = CASE WHEN $9 THEN 0 ELSE desconto END,
+        updated_at=NOW() WHERE id=$8 RETURNING *`,
+      [imovel_id || null, tipo, valor, vencimento, status, descricao, observacoes, id, naoPago]
     );
 
     if (result.rows.length === 0) return res.status(404).json({ error: 'Despesa não encontrada' });
@@ -1986,7 +2000,9 @@ app.post('/api/despesas/:id/reabrir', authenticateToken, [
   try {
     const { id } = req.params;
     const result = await pool.query(
-      `UPDATE despesas SET status='pendente', data_pagamento=NULL, valor_pago=NULL,
+      `UPDATE despesas SET
+        status = CASE WHEN vencimento < CURRENT_DATE THEN 'atrasado' ELSE 'pendente' END,
+        data_pagamento=NULL, valor_pago=NULL,
         forma_pagamento=NULL, juros=0, multa=0, desconto=0, updated_at=NOW()
        WHERE id=$1 RETURNING *`,
       [id]
