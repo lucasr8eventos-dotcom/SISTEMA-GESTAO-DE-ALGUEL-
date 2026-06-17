@@ -89,9 +89,9 @@ export default function Dashboard() {
   // Alertas (somente os que têm contagem > 0)
   const alertas = [
     {
-      cond: stats.alugueisAtrasados > 0,
+      cond: (stats.atrasadosGeral ?? stats.alugueisAtrasados) > 0,
       icon: <Clock size={18} />, color: 'var(--danger)',
-      texto: plural(stats.alugueisAtrasados, 'aluguel atrasado', 'aluguéis atrasados'),
+      texto: plural(stats.atrasadosGeral ?? stats.alugueisAtrasados, 'aluguel em aberto', 'aluguéis em aberto'),
       onClick: () => navigate('/inadimplencia')
     },
     {
@@ -176,8 +176,8 @@ export default function Dashboard() {
           color="var(--accent)" valueColor="var(--accent)" onClick={() => navigate('/pagamentos?status=pendente')}
         />
         <DashStat
-          icon={<AlertTriangle size={24} />} label="Em Aberto" value={formatMoeda(stats.valorAberto)}
-          color="#f97316" valueColor="#f97316" onClick={() => navigate('/pagamentos?status=atrasado')}
+          icon={<AlertTriangle size={24} />} label="Em Aberto (total)" value={formatMoeda(stats.totalEmAberto ?? stats.valorAberto)}
+          color="#f97316" valueColor="#f97316" onClick={() => navigate('/inadimplencia')}
         />
       </div>
 

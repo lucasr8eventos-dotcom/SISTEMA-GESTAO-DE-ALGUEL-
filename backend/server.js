@@ -196,6 +196,35 @@ const validarContratoDoImovel = async (contratoId, imovelId) => {
   return { ok: true };
 };
 
+// Propaga um reajuste já decidido: atualiza o valor do CONTRATO, escala os
+// valores do IMÓVEL (com/sem desconto) pelo mesmo percentual e atualiza as
+// PARCELAS ainda não pagas do mês corrente em diante. NÃO toca em parcelas
+// pagas nem em meses anteriores (preserva a lógica de aluguel mês a mês).
+// `db` pode ser o pool ou um client de transação. Retorna nº de parcelas mexidas.
+async function propagarReajusteContrato(db, { contratoId, imovelId, novoValor, percentual, dataReaj }) {
+  await db.query('UPDATE contratos SET valor=$1, updated_at=NOW() WHERE id=$2', [novoValor, contratoId]);
+  const pct = parseFloat(percentual);
+  if (imovelId && !isNaN(pct) && pct !== 0) {
+    await db.query(
+      `UPDATE imoveis SET
+         valor_sem_desconto = ROUND(valor_sem_desconto * (1 + $1::numeric / 100), 2),
+         valor_com_desconto = CASE WHEN valor_com_desconto IS NOT NULL
+                                   THEN ROUND(valor_com_desconto * (1 + $1::numeric / 100), 2) ELSE NULL END,
+         updated_at = NOW()
+       WHERE id = $2`,
+      [pct, imovelId]
+    );
+  }
+  const r = await db.query(
+    `UPDATE pagamentos SET valor_aluguel = $1, updated_at = NOW()
+     WHERE contrato_id = $2 AND status IN ('pendente','atrasado')
+       AND data_vencimento >= date_trunc('month', $3::date)
+     RETURNING id`,
+    [novoValor, contratoId, dataReaj]
+  );
+  return r.rowCount;
+}
+
 // Verifica se já existe contrato ativo com datas sobrepostas no mesmo imóvel.
 // Considera sobreposição: novo.data_inicio <= existente.data_fim AND novo.data_fim >= existente.data_inicio
 const existeContratoSobreposto = async (imovelId, dataInicio, dataFim, excluirId = null) => {
@@ -1419,34 +1448,11 @@ app.post('/api/contratos/:id/reajustar', authenticateToken, [
     const dataProximo = proximo.toISOString().split('T')[0];
 
     await client.query('BEGIN');
-    const upd = await client.query(
-      `UPDATE contratos SET valor=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
-      [novoValor, id]
-    );
 
-    // Propaga para o IMÓVEL: escala os valores (com/sem desconto) pelo mesmo
-    // percentual, preservando a relação de desconto e o reflexo na tela de Imóveis.
-    await client.query(
-      `UPDATE imoveis SET
-         valor_sem_desconto = ROUND(valor_sem_desconto * (1 + $1::numeric / 100), 2),
-         valor_com_desconto = CASE WHEN valor_com_desconto IS NOT NULL
-                                   THEN ROUND(valor_com_desconto * (1 + $1::numeric / 100), 2)
-                                   ELSE NULL END,
-         updated_at = NOW()
-       WHERE id = $2`,
-      [pctCalc, c.imovel_id]
-    );
-
-    // Propaga para as PARCELAS ainda não pagas a partir do mês do reajuste
-    // (mês atual em diante). Parcelas pagas/parciais e vencidas anteriores ficam
-    // como estavam. Isso atualiza a tela de Pagamentos e, por consequência, o Dashboard.
-    const parc = await client.query(
-      `UPDATE pagamentos SET valor_aluguel = $1, updated_at = NOW()
-       WHERE contrato_id = $2 AND status IN ('pendente','atrasado')
-         AND data_vencimento >= date_trunc('month', $3::date)
-       RETURNING id`,
-      [novoValor, id, dataReaj]
-    );
+    // Propaga contrato + imóvel + parcelas futuras (lógica única, ver helper).
+    const parcelasMexidas = await propagarReajusteContrato(client, {
+      contratoId: id, imovelId: c.imovel_id, novoValor, percentual: pctCalc, dataReaj
+    });
 
     // Resolve reajustes ANTERIORES ainda em aberto (pendente/avisado) deste
     // contrato — marca como 'aplicado' para não continuarem contando como
@@ -1462,9 +1468,10 @@ app.post('/api/contratos/:id/reajustar', authenticateToken, [
        VALUES ($1,$2,$3,$4,$5,$6,$7,'aplicado',$8)`,
       [c.imovel_id, id, valorAtual, dataReaj, dataProximo, pctCalc, novoValor, req.body.observacoes || 'Reajuste informado pela tela de contratos']
     );
+    const upd = await client.query('SELECT * FROM contratos WHERE id=$1', [id]);
     await client.query('COMMIT');
     await logAtividade(req.user.id, 'reajustar_contrato', 'contratos', parseInt(id), `${valorAtual} -> ${novoValor}`, req.ip);
-    res.json({ ...upd.rows[0], parcelas_atualizadas: parc.rowCount });
+    res.json({ ...upd.rows[0], parcelas_atualizadas: parcelasMexidas });
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('Erro ao reajustar contrato:', error.message);
@@ -1591,8 +1598,12 @@ app.post('/api/pagamentos/:id/reabrir', authenticateToken, [
 ], validate, async (req, res) => {
   try {
     const { id } = req.params;
+    // Recalcula o status conforme o vencimento: se já passou, volta 'atrasado'
+    // (não 'pendente'), para não sumir dos filtros de atraso/inadimplência.
     const result = await pool.query(
-      `UPDATE pagamentos SET status='pendente', data_pagamento=NULL, valor_recebido=NULL,
+      `UPDATE pagamentos SET
+        status = CASE WHEN data_vencimento < CURRENT_DATE THEN 'atrasado' ELSE 'pendente' END,
+        data_pagamento=NULL, valor_recebido=NULL,
         forma_pagamento=NULL, juros=0, multa=0, desconto=0, updated_at=NOW()
        WHERE id=$1 RETURNING *`,
       [id]
@@ -2022,10 +2033,20 @@ app.put('/api/despesas/:id', authenticateToken, [
     const { id } = req.params;
     const { imovel_id, tipo, valor, vencimento, status, descricao, observacoes } = req.body;
 
+    // Se a edição reverte a conta para um estado NÃO pago, zera os dados da baixa
+    // (valor_pago/forma/encargos), evitando "pendente com valor_pago > 0".
+    const naoPago = status === 'pendente' || status === 'atrasado';
     const result = await pool.query(
       `UPDATE despesas SET imovel_id=$1, tipo=$2, valor=$3, vencimento=$4, status=$5,
-        descricao=$6, observacoes=$7, updated_at=NOW() WHERE id=$8 RETURNING *`,
-      [imovel_id || null, tipo, valor, vencimento, status, descricao, observacoes, id]
+        descricao=$6, observacoes=$7,
+        data_pagamento = CASE WHEN $9 THEN NULL ELSE data_pagamento END,
+        valor_pago     = CASE WHEN $9 THEN NULL ELSE valor_pago END,
+        forma_pagamento= CASE WHEN $9 THEN NULL ELSE forma_pagamento END,
+        juros          = CASE WHEN $9 THEN 0 ELSE juros END,
+        multa          = CASE WHEN $9 THEN 0 ELSE multa END,
+        desconto       = CASE WHEN $9 THEN 0 ELSE desconto END,
+        updated_at=NOW() WHERE id=$8 RETURNING *`,
+      [imovel_id || null, tipo, valor, vencimento, status, descricao, observacoes, id, naoPago]
     );
 
     if (result.rows.length === 0) return res.status(404).json({ error: 'Despesa não encontrada' });
@@ -2094,7 +2115,9 @@ app.post('/api/despesas/:id/reabrir', authenticateToken, [
   try {
     const { id } = req.params;
     const result = await pool.query(
-      `UPDATE despesas SET status='pendente', data_pagamento=NULL, valor_pago=NULL,
+      `UPDATE despesas SET
+        status = CASE WHEN vencimento < CURRENT_DATE THEN 'atrasado' ELSE 'pendente' END,
+        data_pagamento=NULL, valor_pago=NULL,
         forma_pagamento=NULL, juros=0, multa=0, desconto=0, updated_at=NOW()
        WHERE id=$1 RETURNING *`,
       [id]
@@ -2498,6 +2521,15 @@ app.post('/api/reajustes', authenticateToken, [
       [imovel_id, contrato_id || null, valor_atual, data_ultimo || null, data_proximo, percentual, novoValorCalc, status, observacoes]
     );
 
+    // Se já foi criado como 'aplicado', propaga igual ao botão "Informar reajuste".
+    if (status === 'aplicado' && result.rows[0].contrato_id) {
+      const dataReaj = data_ultimo || new Date().toISOString().split('T')[0];
+      await propagarReajusteContrato(pool, {
+        contratoId: result.rows[0].contrato_id, imovelId: result.rows[0].imovel_id,
+        novoValor: novoValorCalc, percentual, dataReaj
+      });
+    }
+
     await logAtividade(req.user.id, 'criar_reajuste', 'reajustes', result.rows[0].id, null, req.ip);
     res.status(201).json(result.rows[0]);
   } catch (error) {
@@ -2524,6 +2556,12 @@ app.put('/api/reajustes/:id', authenticateToken, [
     const coerencia = await validarContratoDoImovel(contrato_id, imovel_id);
     if (!coerencia.ok) return res.status(400).json({ error: coerencia.error });
 
+    // Status anterior, para só APLICAR quando houver transição para 'aplicado'
+    // (evita re-aplicar o reajuste — escalar o imóvel 2× — ao re-salvar).
+    const antes = await pool.query('SELECT status FROM reajustes WHERE id=$1', [id]);
+    if (antes.rows.length === 0) return res.status(404).json({ error: 'Reajuste não encontrado' });
+    const eraAplicado = antes.rows[0].status === 'aplicado';
+
     const result = await pool.query(
       `UPDATE reajustes SET imovel_id=$1, contrato_id=$2, valor_atual=$3, data_ultimo=$4,
         data_proximo=$5, percentual=$6, novo_valor=$7, status=$8, observacoes=$9, updated_at=NOW()
@@ -2531,18 +2569,14 @@ app.put('/api/reajustes/:id', authenticateToken, [
       [imovel_id, contrato_id || null, valor_atual, data_ultimo || null, data_proximo, percentual, novoValorCalc, status, observacoes, id]
     );
 
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Reajuste não encontrado' });
-
-    // Ao marcar reajuste como 'aplicado', atualiza o valor do contrato e do imóvel
-    if (status === 'aplicado' && result.rows[0].contrato_id) {
-      await pool.query(
-        'UPDATE contratos SET valor=$1, updated_at=NOW() WHERE id=$2',
-        [novoValorCalc, result.rows[0].contrato_id]
-      );
-      await pool.query(
-        'UPDATE imoveis SET valor_sem_desconto=$1, updated_at=NOW() WHERE id=$2',
-        [novoValorCalc, result.rows[0].imovel_id]
-      );
+    // Ao APLICAR (transição para 'aplicado'), propaga igual ao botão "Informar
+    // reajuste": contrato + imóvel (escalado) + parcelas futuras não pagas.
+    if (status === 'aplicado' && !eraAplicado && result.rows[0].contrato_id) {
+      const dataReaj = data_ultimo || new Date().toISOString().split('T')[0];
+      await propagarReajusteContrato(pool, {
+        contratoId: result.rows[0].contrato_id, imovelId: result.rows[0].imovel_id,
+        novoValor: novoValorCalc, percentual, dataReaj
+      });
     }
 
     await logAtividade(req.user.id, 'editar_reajuste', 'reajustes', parseInt(id), null, req.ip);
@@ -2580,7 +2614,7 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
     dataLimite30.setDate(dataLimite30.getDate() + 30);
 
     const [
-      totalImoveis, imoveisPorStatus, pagamentosMes,
+      totalImoveis, imoveisPorStatus, pagamentosMes, emAbertoGeral,
       despesasMes, contratosVencendo, reajustesPendentes, alertas
     ] = await Promise.all([
       pool.query('SELECT COUNT(*) as total FROM imoveis'),
@@ -2595,6 +2629,16 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
           COUNT(CASE WHEN status='atrasado' THEN 1 END) as total_atrasados
         FROM pagamentos WHERE mes=$1 AND ano=$2
       `, [mesAtual, anoAtual]),
+      // Dívida REAL em aberto somando TODOS os meses (igual à tela Inadimplência):
+      // atrasados + parciais + pendentes já vencidos, com saldo > 0.
+      pool.query(`
+        SELECT
+          COALESCE(SUM(valor_aluguel - COALESCE(valor_recebido, 0)), 0) AS total_em_aberto,
+          COUNT(*) AS qtd_em_aberto
+        FROM pagamentos
+        WHERE (valor_aluguel - COALESCE(valor_recebido, 0)) > 0
+          AND (status='atrasado' OR status='parcial' OR (status='pendente' AND data_vencimento < CURRENT_DATE))
+      `),
       pool.query(`
         SELECT SUM(valor) as total FROM despesas
         WHERE EXTRACT(MONTH FROM vencimento)=$1 AND EXTRACT(YEAR FROM vencimento)=$2
@@ -2630,6 +2674,9 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
       totalRecebido,
       valorAberto: totalAberto,
       alugueisAtrasados: parseInt(pagamentosMes.rows[0]?.total_atrasados || 0),
+      // Dívida total em aberto somando TODOS os meses (bate com a tela Inadimplência)
+      totalEmAberto: parseFloat(emAbertoGeral.rows[0]?.total_em_aberto || 0),
+      atrasadosGeral: parseInt(emAbertoGeral.rows[0]?.qtd_em_aberto || 0),
       despesasMes: parseFloat(despesasMes.rows[0]?.total || 0),
       contratosVencendo: parseInt(contratosVencendo.rows[0].total),
       reajustesPendentes: parseInt(reajustesPendentes.rows[0].total),
@@ -3754,6 +3801,16 @@ async function runSchemaInit() {
     const sql = fs.readFileSync(schemaPath, 'utf8');
     await pool.query(sql);
     console.log('✅ Schema verificado/criado');
+
+    // Dados de exemplo só entram se explicitamente pedido (demo/dev). Em
+    // produção o sistema sobe LIMPO — sem imóveis/inquilinos fictícios.
+    if (process.env.SEED_EXAMPLE_DATA === 'true') {
+      const seedPath = path.join(__dirname, 'seed-exemplo.sql');
+      if (fs.existsSync(seedPath)) {
+        await pool.query(fs.readFileSync(seedPath, 'utf8'));
+        console.log('🌱 Dados de exemplo carregados (SEED_EXAMPLE_DATA=true)');
+      }
+    }
   } catch (err) {
     console.error('⚠️  Erro ao inicializar schema:', err.message);
   }

@@ -6,7 +6,7 @@ import { MoneyInput } from '../../components/MaskedInput';
 import MetricCard from '../../components/MetricCard';
 import { EmptyState, ErrorState } from '../../components/StateViews';
 import SearchInput from '../../components/filters/SearchInput';
-import { formatMoeda, formatData, MESES } from '../../utils/format';
+import { formatMoeda, formatData, MESES, statusPagamento } from '../../utils/format';
 import { AlertTriangle, ChevronDown, ChevronRight, Phone, Copy, MessageCircle, CheckCircle2, Banknote } from 'lucide-react';
 
 const FORMAS_PAG = [
@@ -19,12 +19,8 @@ const FORMAS_PAG = [
 const hojeISO = () => new Date().toISOString().split('T')[0];
 
 const statusInfo = (s) => {
-  const map = {
-    atrasado: { label: 'Atrasado', cls: 'badge-danger' },
-    pendente: { label: 'Vencido', cls: 'badge-warning' },
-    parcial: { label: 'Parcial', cls: 'badge-info' }
-  };
-  return map[s] || { label: s, cls: 'badge-gray' };
+  const { label, className } = statusPagamento(s);
+  return { label, cls: className };
 };
 
 // Severidade pela quantidade de meses em aberto
