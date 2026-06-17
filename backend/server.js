@@ -186,6 +186,10 @@ const logAtividade = async (usuarioId, acao, entidade = null, entidadeId = null,
 
 // Verifica se contrato_id pertence ao imovel_id informado.
 // Retorna { ok: true } se coerente (ou se contrato_id é nulo).
+// Aceita só inteiros em filtros numéricos vindos da query string — evita 500
+// por cast inválido no Postgres (ex.: ?mes=abc). Retorna o valor ou undefined.
+const intQ = (v) => (/^\d+$/.test(String(v ?? '')) ? v : undefined);
+
 const validarContratoDoImovel = async (contratoId, imovelId) => {
   if (!contratoId) return { ok: true };
   const r = await pool.query('SELECT imovel_id FROM contratos WHERE id=$1', [contratoId]);
@@ -1024,7 +1028,7 @@ app.get('/api/contratos', authenticateToken, async (req, res) => {
       params.push(status);
       conditions.push(`c.status = $${params.length}`);
     }
-    if (imovel_id) {
+    if (intQ(imovel_id)) {
       params.push(imovel_id);
       conditions.push(`c.imovel_id = $${params.length}`);
     }
@@ -1386,12 +1390,12 @@ app.get('/api/pagamentos', authenticateToken, async (req, res) => {
     const params = [];
     const conditions = [];
 
-    if (mes) { params.push(mes); conditions.push(`p.mes = $${params.length}`); }
-    if (ano) { params.push(ano); conditions.push(`p.ano = $${params.length}`); }
+    if (intQ(mes)) { params.push(mes); conditions.push(`p.mes = $${params.length}`); }
+    if (intQ(ano)) { params.push(ano); conditions.push(`p.ano = $${params.length}`); }
     // Intervalo por data de vencimento (tem prioridade sobre mes/ano quando informado)
     if (data_inicio && dataRe.test(data_inicio)) { params.push(data_inicio); conditions.push(`p.data_vencimento >= $${params.length}`); }
     if (data_fim && dataRe.test(data_fim)) { params.push(data_fim); conditions.push(`p.data_vencimento <= $${params.length}`); }
-    if (imovel_id) { params.push(imovel_id); conditions.push(`p.imovel_id = $${params.length}`); }
+    if (intQ(imovel_id)) { params.push(imovel_id); conditions.push(`p.imovel_id = $${params.length}`); }
     if (status) { params.push(status); conditions.push(`p.status = $${params.length}`); }
     if (busca) {
       params.push(`%${busca}%`);
@@ -1828,11 +1832,11 @@ app.get('/api/despesas', authenticateToken, async (req, res) => {
     const params = [];
     const conditions = [];
 
-    if (imovel_id) { params.push(imovel_id); conditions.push(`d.imovel_id = $${params.length}`); }
+    if (intQ(imovel_id)) { params.push(imovel_id); conditions.push(`d.imovel_id = $${params.length}`); }
     if (status) { params.push(status); conditions.push(`d.status = $${params.length}`); }
     if (tipo) { params.push(tipo); conditions.push(`d.tipo = $${params.length}`); }
-    if (mes) { params.push(mes); conditions.push(`EXTRACT(MONTH FROM d.vencimento) = $${params.length}`); }
-    if (ano) { params.push(ano); conditions.push(`EXTRACT(YEAR FROM d.vencimento) = $${params.length}`); }
+    if (intQ(mes)) { params.push(mes); conditions.push(`EXTRACT(MONTH FROM d.vencimento) = $${params.length}`); }
+    if (intQ(ano)) { params.push(ano); conditions.push(`EXTRACT(YEAR FROM d.vencimento) = $${params.length}`); }
 
     if (conditions.length > 0) queryStr += ' WHERE ' + conditions.join(' AND ');
     queryStr += ' ORDER BY d.vencimento DESC';
@@ -2100,9 +2104,9 @@ const buscarDespesasParaExport = async (req) => {
   const conditions = [];
   if (status) { params.push(status); conditions.push(`d.status = $${params.length}`); }
   if (tipo) { params.push(tipo); conditions.push(`d.tipo = $${params.length}`); }
-  if (imovel_id) { params.push(imovel_id); conditions.push(`d.imovel_id = $${params.length}`); }
-  if (mes) { params.push(mes); conditions.push(`EXTRACT(MONTH FROM d.vencimento) = $${params.length}`); }
-  if (ano) { params.push(ano); conditions.push(`EXTRACT(YEAR FROM d.vencimento) = $${params.length}`); }
+  if (intQ(imovel_id)) { params.push(imovel_id); conditions.push(`d.imovel_id = $${params.length}`); }
+  if (intQ(mes)) { params.push(mes); conditions.push(`EXTRACT(MONTH FROM d.vencimento) = $${params.length}`); }
+  if (intQ(ano)) { params.push(ano); conditions.push(`EXTRACT(YEAR FROM d.vencimento) = $${params.length}`); }
   if (conditions.length > 0) queryStr += ' WHERE ' + conditions.join(' AND ');
   queryStr += ' ORDER BY d.vencimento DESC';
   const result = await pool.query(queryStr, params);
