@@ -40,15 +40,21 @@ export const statusImovel = (status) => {
   return map[status] || { label: status, className: 'badge-gray' };
 };
 
-export const statusDespesa = (status) => {
+// Dicionário ÚNICO de status de pagamento/conta — usado em Pagamentos,
+// Inadimplência e Contas a Pagar para o mesmo status nunca aparecer com
+// nomes diferentes entre as telas.
+export const statusPagamento = (status) => {
   const map = {
     pago: { label: 'Pago', className: 'badge-success' },
     pendente: { label: 'Pendente', className: 'badge-warning' },
-    atrasado: { label: 'Vencido', className: 'badge-danger' },
+    atrasado: { label: 'Atrasado', className: 'badge-danger' },
     parcial: { label: 'Parcial', className: 'badge-info' }
   };
   return map[status] || { label: status, className: 'badge-gray' };
 };
+
+// Mantido por compatibilidade; agora aponta para o dicionário único.
+export const statusDespesa = statusPagamento;
 
 export const statusReajuste = (status) => {
   const map = {
@@ -78,7 +84,9 @@ export const garantiaLabel = (g) => {
 export const formaPagamentoLabel = (f) => {
   const map = {
     dinheiro: 'Dinheiro', pix: 'PIX', transferencia: 'Transferência',
-    boleto: 'Boleto', cartao: 'Cartão'
+    boleto: 'Boleto', cartao: 'Cartão', ted: 'TED', cheque: 'Cheque',
+    debito_automatico: 'Débito automático', debito: 'Cartão de Débito',
+    credito: 'Cartão de Crédito', outro: 'Outro'
   };
   return map[f] || f;
 };

@@ -12,7 +12,7 @@ import PeriodPicker from '../../components/filters/PeriodPicker';
 import SearchInput from '../../components/filters/SearchInput';
 import MetricCard from '../../components/MetricCard';
 import { EmptyState, EmptyFiltered, ErrorState } from '../../components/StateViews';
-import { formatMoeda, formatData, getMesAtual, getAnoAtual, MESES, formaPagamentoLabel } from '../../utils/format';
+import { formatMoeda, formatData, getMesAtual, getAnoAtual, MESES, formaPagamentoLabel, statusPagamento } from '../../utils/format';
 import { Pencil, Trash2, FileText, Banknote, RefreshCw, CheckCircle2, RotateCcw } from 'lucide-react';
 
 const hojeISO = () => new Date().toISOString().split('T')[0];
@@ -51,9 +51,8 @@ const STATUS_OPTIONS = [
 ];
 
 const StatusBadge = ({ status }) => {
-  const map = { pago: 'success', pendente: 'warning', atrasado: 'danger', parcial: 'info' };
-  const label = { pago: 'Pago', pendente: 'Pendente', atrasado: 'Atrasado', parcial: 'Parcial' };
-  return <span className={`badge badge-${map[status] || 'gray'}`}>{label[status] || status}</span>;
+  const s = statusPagamento(status);
+  return <span className={`badge ${s.className}`}>{s.label}</span>;
 };
 
 export default function Pagamentos() {

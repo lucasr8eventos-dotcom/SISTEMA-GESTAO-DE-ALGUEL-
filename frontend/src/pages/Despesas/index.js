@@ -44,7 +44,7 @@ const STATUS_OPTIONS = [
   { value: 'pendente', label: 'Pendente', color: 'warning' },
   { value: 'parcial', label: 'Parcial', color: 'info' },
   { value: 'pago', label: 'Pago', color: 'success' },
-  { value: 'atrasado', label: 'Vencido', color: 'danger' }
+  { value: 'atrasado', label: 'Atrasado', color: 'danger' }
 ];
 
 const ALERTA_DIAS = 5;
@@ -335,7 +335,7 @@ export default function Despesas() {
           active={filtroStatus === 'pendente'}
           onClick={() => setFiltroStatus(filtroStatus === 'pendente' ? '' : 'pendente')}
         />
-        <MetricCard label="Vencido" value={formatMoeda(stats.atrasado)} color="var(--danger)" active={filtroStatus === 'atrasado'} onClick={() => setFiltroStatus(filtroStatus === 'atrasado' ? '' : 'atrasado')} />
+        <MetricCard label="Atrasado" value={formatMoeda(stats.atrasado)} color="var(--danger)" active={filtroStatus === 'atrasado'} onClick={() => setFiltroStatus(filtroStatus === 'atrasado' ? '' : 'atrasado')} />
       </div>
 
       {/* Filtros */}
@@ -372,7 +372,7 @@ export default function Despesas() {
             <div><span style={{ color: 'var(--gray-500)' }}>Total: </span><strong>{formatMoeda(statsFiltro.total)}</strong></div>
             <div><span style={{ color: 'var(--gray-500)' }}>Pago: </span><strong style={{ color: 'var(--success)' }}>{formatMoeda(statsFiltro.pago)}</strong></div>
             <div><span style={{ color: 'var(--gray-500)' }}>Em aberto: </span><strong style={{ color: 'var(--warning)' }}>{formatMoeda(statsFiltro.aberto)}</strong></div>
-            <div><span style={{ color: 'var(--gray-500)' }}>Vencido: </span><strong style={{ color: 'var(--danger)' }}>{formatMoeda(statsFiltro.atrasado)}</strong></div>
+            <div><span style={{ color: 'var(--gray-500)' }}>Atrasado: </span><strong style={{ color: 'var(--danger)' }}>{formatMoeda(statsFiltro.atrasado)}</strong></div>
           </div>
           <div className="form-hint" style={{ marginTop: 6 }}>Os cards acima mostram sempre o total geral do período.</div>
         </div>
@@ -517,7 +517,7 @@ export default function Despesas() {
           <div className="form-group">
             <label className="form-label">Status <span className="required">*</span></label>
             <select className="form-control" value={form.status} onChange={(e) => setF('status', e.target.value)} required>
-              <option value="pendente">Em aberto</option>
+              <option value="pendente">Pendente</option>
               <option value="pago">Pago</option>
               <option value="atrasado">Atrasado</option>
             </select>

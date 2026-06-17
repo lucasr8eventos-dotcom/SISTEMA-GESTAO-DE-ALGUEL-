@@ -8,7 +8,7 @@ import Tabs from '../../components/Tabs';
 import CadastroCompleto from './CadastroCompleto';
 import { MoneyInput, CpfCnpjInput, PhoneInput } from '../../components/MaskedInput';
 import { maskCpfCnpj, maskPhone } from '../../utils/masks';
-import { formatMoeda, formatData, statusImovel, tipoImovel } from '../../utils/format';
+import { formatMoeda, formatData, statusImovel, tipoImovel, statusPagamento } from '../../utils/format';
 import Pagination, { PER_PAGE } from '../../components/Pagination';
 import { Pencil, Trash2, Search, History, Building2, CheckCircle2, KeyRound, Wrench, User, FileText } from 'lucide-react';
 
@@ -604,8 +604,8 @@ export default function Imoveis() {
                     <td>{formatData(p.data_vencimento)}</td>
                     <td>{formatData(p.data_pagamento)}</td>
                     <td>
-                      <span className={`badge badge-${p.status === 'pago' ? 'success' : p.status === 'atrasado' ? 'danger' : p.status === 'parcial' ? 'info' : 'warning'}`}>
-                        {p.status}
+                      <span className={`badge ${statusPagamento(p.status).className}`}>
+                        {statusPagamento(p.status).label}
                       </span>
                     </td>
                   </tr>

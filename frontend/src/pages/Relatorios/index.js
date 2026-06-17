@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { relatoriosService, downloadBlob } from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
-import { formatMoeda, formatData, getMesAtual, getAnoAtual, MESES } from '../../utils/format';
+import { formatMoeda, formatData, getMesAtual, getAnoAtual, MESES, statusPagamento, statusImovel, formaPagamentoLabel, tipoDespesaLabel, tipoImovel } from '../../utils/format';
 
 const anos = Array.from({ length: 5 }, (_, i) => getAnoAtual() - 2 + i);
 
@@ -119,8 +119,8 @@ export default function Relatorios() {
                 <td>{formatMoeda(p.valor_aluguel)}</td>
                 <td>{p.valor_recebido ? formatMoeda(p.valor_recebido) : '—'}</td>
                 <td>{formatData(p.data_pagamento)}</td>
-                <td>{p.forma_pagamento || '—'}</td>
-                <td><span className={`badge badge-${p.status === 'pago' ? 'success' : p.status === 'atrasado' ? 'danger' : p.status === 'parcial' ? 'info' : 'warning'}`}>{p.status}</span></td>
+                <td>{p.forma_pagamento ? formaPagamentoLabel(p.forma_pagamento) : '—'}</td>
+                <td><span className={`badge ${statusPagamento(p.status).className}`}>{statusPagamento(p.status).label}</span></td>
               </tr>
             ))}</tbody>
           </table>
@@ -152,10 +152,10 @@ export default function Relatorios() {
         <tbody>{dados.map((im, i) => (
           <tr key={i}>
             <td><strong>{im.codigo}</strong></td>
-            <td>{im.tipo}</td>
+            <td>{tipoImovel(im.tipo)}</td>
             <td>{im.endereco}</td>
             <td>{formatMoeda(im.valor_sem_desconto)}</td>
-            <td><span className={`badge ${im.status === 'vago' ? 'badge-warning' : 'badge-info'}`}>{im.status}</span></td>
+            <td><span className={`badge ${statusImovel(im.status).className}`}>{statusImovel(im.status).label}</span></td>
           </tr>
         ))}</tbody>
       </table>
@@ -194,11 +194,11 @@ export default function Relatorios() {
             <tbody>{dados.map((d, i) => (
               <tr key={i}>
                 <td><strong>{d.imovel_codigo}</strong></td>
-                <td>{d.tipo}</td>
+                <td>{tipoDespesaLabel(d.tipo)}</td>
                 <td>{d.descricao || '—'}</td>
                 <td>{formatMoeda(d.valor)}</td>
                 <td>{formatData(d.vencimento)}</td>
-                <td><span className={`badge badge-${d.status === 'pago' ? 'success' : d.status === 'atrasado' ? 'danger' : 'warning'}`}>{d.status}</span></td>
+                <td><span className={`badge ${statusPagamento(d.status).className}`}>{statusPagamento(d.status).label}</span></td>
               </tr>
             ))}</tbody>
           </table>
