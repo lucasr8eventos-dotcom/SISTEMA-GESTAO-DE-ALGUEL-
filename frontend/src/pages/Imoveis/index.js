@@ -47,6 +47,10 @@ export default function Imoveis() {
   const [form, setForm] = useState(FORM_IMOVEL_INICIAL);
   const [editando, setEditando] = useState(null);
   const [salvando, setSalvando] = useState(false);
+  // Fluxo "Alugar imóvel vago" (inquilino novo + contrato)
+  const [alugarAlvo, setAlugarAlvo] = useState(null);
+  const [alugarForm, setAlugarForm] = useState(null);
+  const [alugarSalvando, setAlugarSalvando] = useState(false);
   const [erros, setErros] = useState({});
   const [page, setPage] = useState(1);
   const [historicoModal, setHistoricoModal] = useState(null);
@@ -273,6 +277,41 @@ export default function Imoveis() {
     }
   };
 
+  // ===== Alugar imóvel vago (cria inquilino novo + contrato) =====
+  const abrirAlugar = (im) => {
+    setAlugarAlvo(im);
+    setAlugarForm({
+      nome: '', cpf_cnpj: '', telefone: '', email: '',
+      data_inicio: '', data_fim: '',
+      valor: String(im.valor_com_desconto || im.valor_sem_desconto || ''),
+      garantia: 'fiador', renovacao_automatica: true
+    });
+  };
+  const setAL = (campo, valor) => setAlugarForm((p) => ({ ...p, [campo]: valor }));
+  const confirmarAlugar = async () => {
+    setAlugarSalvando(true);
+    try {
+      await imoveisService.alugar(alugarAlvo.id, {
+        inquilino: {
+          nome: alugarForm.nome, cpf_cnpj: alugarForm.cpf_cnpj,
+          telefone: alugarForm.telefone, email: alugarForm.email || undefined
+        },
+        contrato: {
+          data_inicio: alugarForm.data_inicio, data_fim: alugarForm.data_fim,
+          valor: parseFloat(alugarForm.valor), garantia: alugarForm.garantia,
+          renovacao_automatica: alugarForm.renovacao_automatica
+        }
+      });
+      toast.success('Imóvel alugado! Contrato criado e parcela do mês gerada.');
+      setAlugarAlvo(null);
+      fetchImoveis(); fetchTodos();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Erro ao alugar o imóvel');
+    } finally {
+      setAlugarSalvando(false);
+    }
+  };
+
   const setF = (campo, valor) => {
     setForm(prev => ({ ...prev, [campo]: valor }));
     setErros(prev => (prev[campo] ? { ...prev, [campo]: undefined } : prev));
@@ -400,6 +439,9 @@ export default function Imoveis() {
                       <td><span className={`badge ${st.className}`}>{st.label}</span></td>
                       <td onClick={(e) => e.stopPropagation()}>
                         <div className="table-actions">
+                          {im.status !== 'alugado' && (
+                            <button className="btn btn-success btn-sm btn-icon" title="Alugar imóvel" onClick={() => abrirAlugar(im)}><KeyRound size={14} /></button>
+                          )}
                           <button className="btn btn-ghost btn-sm btn-icon" title="Ficha completa (PDF)" onClick={() => gerarFicha(im)}><FileText size={14} /></button>
                           <button className="btn btn-ghost btn-sm btn-icon" title="Histórico" onClick={() => verHistorico(im)}><History size={14} /></button>
                           <button className="btn btn-ghost btn-sm btn-icon" title="Editar" onClick={() => abrirEditar(im)}><Pencil size={14} /></button>
@@ -623,6 +665,87 @@ export default function Imoveis() {
         title="Excluir Imóvel"
         message={`Tem certeza que deseja excluir o imóvel "${confirmExcluir?.codigo}"? Esta ação não pode ser desfeita.`}
       />
+
+      {/* ===== Alugar imóvel vago (inquilino novo + contrato) ===== */}
+      <Modal
+        isOpen={!!alugarAlvo}
+        onClose={() => setAlugarAlvo(null)}
+        title={alugarAlvo ? `Alugar imóvel ${alugarAlvo.codigo}` : 'Alugar imóvel'}
+        size="lg"
+        footer={
+          <>
+            <button className="btn btn-ghost" onClick={() => setAlugarAlvo(null)}>Cancelar</button>
+            <button className="btn btn-success" onClick={confirmarAlugar} disabled={alugarSalvando}>
+              {alugarSalvando ? 'Alugando...' : 'Alugar (criar contrato)'}
+            </button>
+          </>
+        }
+      >
+        {alugarForm && (
+          <>
+            <div style={{ background: 'var(--gray-50)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 16, fontSize: 13 }}>
+              Cadastre o <strong>inquilino</strong> e os dados do <strong>contrato</strong>. Ao salvar, o imóvel passa a <strong>alugado</strong> e a parcela do mês é gerada.
+            </div>
+
+            <div className="stats-block-label" style={{ marginBottom: 8 }}>Inquilino</div>
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">Nome <span className="required">*</span></label>
+                <input className="form-control" value={alugarForm.nome} onChange={(e) => setAL('nome', e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">CPF/CNPJ <span className="required">*</span></label>
+                <CpfCnpjInput value={alugarForm.cpf_cnpj} onChange={(v) => setAL('cpf_cnpj', v)} />
+              </div>
+            </div>
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">Telefone <span className="required">*</span></label>
+                <PhoneInput value={alugarForm.telefone} onChange={(v) => setAL('telefone', v)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">E-mail</label>
+                <input className="form-control" type="email" value={alugarForm.email} onChange={(e) => setAL('email', e.target.value)} />
+              </div>
+            </div>
+
+            <div className="stats-block-label" style={{ margin: '8px 0' }}>Contrato</div>
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">Início <span className="required">*</span></label>
+                <input className="form-control" type="date" value={alugarForm.data_inicio} onChange={(e) => setAL('data_inicio', e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Fim <span className="required">*</span></label>
+                <input className="form-control" type="date" value={alugarForm.data_fim} onChange={(e) => setAL('data_fim', e.target.value)} />
+              </div>
+            </div>
+            <div className="form-grid-3">
+              <div className="form-group">
+                <label className="form-label">Valor mensal <span className="required">*</span></label>
+                <MoneyInput value={alugarForm.valor} onChange={(v) => setAL('valor', v)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Garantia</label>
+                <select className="form-control" value={alugarForm.garantia} onChange={(e) => setAL('garantia', e.target.value)}>
+                  <option value="fiador">Fiador</option>
+                  <option value="caucao">Caução</option>
+                  <option value="seguro">Seguro Fiança</option>
+                  <option value="sem">Sem Garantia</option>
+                  <option value="outro">Outro</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Renovação automática</label>
+                <label className="checkbox-inline" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+                  <input type="checkbox" checked={alugarForm.renovacao_automatica} onChange={(e) => setAL('renovacao_automatica', e.target.checked)} />
+                  Renovar +1 ano ao vencer
+                </label>
+              </div>
+            </div>
+          </>
+        )}
+      </Modal>
 
       <CadastroCompleto
         isOpen={cadastroCompleto}

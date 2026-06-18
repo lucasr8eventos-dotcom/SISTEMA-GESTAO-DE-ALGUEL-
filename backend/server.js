@@ -718,6 +718,71 @@ app.post('/api/imoveis', authenticateToken, [
 // Tudo-ou-nada: se QUALQUER etapa falhar, faz ROLLBACK e nada é gravado (não
 // deixa imóvel órfão). Se o CPF/CNPJ informado já existir, reaproveita o
 // inquilino em vez de falhar. Retorna mensagens de erro claras para a tela.
+// Alugar um imóvel EXISTENTE que está vago: cria o inquilino + o contrato e
+// marca o imóvel como alugado, tudo na MESMA transação. Usado pelo botão
+// "Alugar" na lista de Imóveis. Gera a parcela do mês corrente em seguida.
+app.post('/api/imoveis/:id/alugar', authenticateToken, [
+  param('id').isInt({ min: 1 })
+], validate, async (req, res) => {
+  const { inquilino = {}, contrato = {} } = req.body || {};
+  const garantias = ['caucao', 'fiador', 'seguro', 'sem', 'outro'];
+  const erros = [];
+  if (!inquilino.nome || !String(inquilino.nome).trim()) erros.push('Informe o nome do inquilino');
+  if (String(inquilino.cpf_cnpj || '').replace(/\D/g, '').length < 11) erros.push('CPF/CNPJ do inquilino inválido');
+  if (!inquilino.telefone || !String(inquilino.telefone).trim()) erros.push('Informe o telefone do inquilino');
+  if (!contrato.data_inicio || !contrato.data_fim) erros.push('Informe início e fim do contrato');
+  if (contrato.data_inicio && contrato.data_fim && new Date(contrato.data_fim) <= new Date(contrato.data_inicio)) erros.push('A data de fim do contrato deve ser posterior ao início');
+  if (contrato.valor === '' || contrato.valor == null || isNaN(parseFloat(contrato.valor))) erros.push('Informe o valor mensal do contrato');
+  if (contrato.garantia && !garantias.includes(contrato.garantia)) erros.push('Tipo de garantia inválido');
+  if (erros.length) return res.status(422).json({ error: erros[0], detalhes: erros });
+
+  const { id } = req.params;
+  // Pré-checagens (fora da transação): imóvel existe e NÃO tem contrato ativo
+  const im = await pool.query('SELECT id FROM imoveis WHERE id=$1', [id]);
+  if (im.rows.length === 0) return res.status(404).json({ error: 'Imóvel não encontrado' });
+  const jaAtivo = await pool.query("SELECT id FROM contratos WHERE imovel_id=$1 AND status='ativo' LIMIT 1", [id]);
+  if (jaAtivo.rows.length) return res.status(400).json({ error: 'Este imóvel já tem um contrato ativo. Encerre-o antes de alugar novamente.' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // Inquilino — reaproveita se o CPF/CNPJ já existir (ex.: inquilino que voltou)
+    const cpfDigits = String(inquilino.cpf_cnpj).replace(/\D/g, '');
+    const existInq = await client.query(
+      "SELECT id FROM inquilinos WHERE REGEXP_REPLACE(cpf_cnpj, '[^0-9]', '', 'g') = $1", [cpfDigits]
+    );
+    let inquilinoId, inquilinoReuso = false;
+    if (existInq.rows.length) { inquilinoId = existInq.rows[0].id; inquilinoReuso = true; }
+    else {
+      const inqRes = await client.query(
+        'INSERT INTO inquilinos (nome, cpf_cnpj, telefone, email, endereco, observacoes) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+        [inquilino.nome, inquilino.cpf_cnpj, inquilino.telefone, inquilino.email || null, inquilino.endereco || null, inquilino.observacoes || null]
+      );
+      inquilinoId = inqRes.rows[0].id;
+    }
+    const renovacaoAuto = (contrato.renovacao_automatica === true || contrato.renovacao_automatica === 'true');
+    const cRes = await client.query(
+      `INSERT INTO contratos (imovel_id, inquilino_id, data_inicio, data_fim, valor, garantia, status, renovacao_automatica, observacoes)
+       VALUES ($1,$2,$3,$4,$5,$6,'ativo',$7,$8) RETURNING *`,
+      [id, inquilinoId, contrato.data_inicio, contrato.data_fim, contrato.valor, contrato.garantia || 'sem', renovacaoAuto, contrato.observacoes || null]
+    );
+    await client.query("UPDATE imoveis SET status='alugado' WHERE id=$1", [id]);
+    await client.query('COMMIT');
+
+    const agora = new Date();
+    await gerarParcelasMensais(agora.getMonth() + 1, agora.getFullYear()).catch(() => {});
+    await logAtividade(req.user.id, 'alugar_imovel', 'imoveis', parseInt(id), `contrato ${cRes.rows[0].id}`, req.ip);
+    res.status(201).json({ contrato: cRes.rows[0], inquilino_id: inquilinoId, inquilino_reaproveitado: inquilinoReuso });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (error.code === '23505') return res.status(400).json({ error: 'Registro duplicado. Nada foi gravado.' });
+    console.error('Erro ao alugar imóvel:', error.message);
+    res.status(500).json({ error: 'Erro ao alugar o imóvel. Nada foi gravado.' });
+  } finally {
+    client.release();
+  }
+});
+
 app.post('/api/imoveis/cadastro-completo', authenticateToken, async (req, res) => {
   const { imovel = {}, inquilino = {}, contrato = {}, vincular } = req.body || {};
   const tipos = ['casa', 'apartamento', 'comercial', 'terreno', 'galpao'];
@@ -863,6 +928,26 @@ app.put('/api/imoveis/:id', authenticateToken, [
     );
 
     if (result.rows.length === 0) return res.status(404).json({ error: 'Imóvel não encontrado' });
+
+    // Se o imóvel passou a VAGO/ENCERRADO, encerra os contratos ATIVOS dele e
+    // remove as parcelas FUTURAS pendentes (mantém pagas e já vencidas para
+    // histórico). Assim o imóvel desalugado não fica gerando cobrança futura.
+    if (status === 'vago' || status === 'encerrado') {
+      const cts = await pool.query(
+        "UPDATE contratos SET status='encerrado', updated_at=NOW() WHERE imovel_id=$1 AND status='ativo' RETURNING id",
+        [id]
+      );
+      for (const ct of cts.rows) {
+        await pool.query(
+          `DELETE FROM pagamentos WHERE contrato_id=$1 AND status='pendente'
+             AND data_pagamento IS NULL AND data_vencimento > CURRENT_DATE`,
+          [ct.id]
+        );
+      }
+      if (cts.rowCount > 0) {
+        await logAtividade(req.user.id, 'encerrar_contrato_imovel_vago', 'imoveis', parseInt(id), `${cts.rowCount} contrato(s) encerrado(s)`, req.ip);
+      }
+    }
 
     await logAtividade(req.user.id, 'editar_imovel', 'imoveis', parseInt(id), null, req.ip);
     res.json(result.rows[0]);
