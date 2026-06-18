@@ -546,7 +546,7 @@ app.post('/api/inquilinos', authenticateToken, [
   body('nome').trim().isLength({ min: 2, max: 255 }),
   body('cpf_cnpj').trim().isLength({ min: 11, max: 20 }),
   body('telefone').trim().isLength({ min: 8, max: 20 }),
-  body('email').optional({ nullable: true }).isEmail().normalizeEmail()
+  body('email').optional({ values: 'falsy' }).isEmail().normalizeEmail()
 ], validate, async (req, res) => {
   try {
     const { nome, cpf_cnpj, telefone, email, endereco, observacoes } = req.body;
