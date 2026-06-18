@@ -270,10 +270,16 @@ const gerarParcelasMensais = async (mes, ano) => {
   const ultimoDia = new Date(ano, mes, 0).getDate();
   const inicioMes = `${ano}-${String(mes).padStart(2, '0')}-01`;
   const fimMes = `${ano}-${String(mes).padStart(2, '0')}-${String(ultimoDia).padStart(2, '0')}`;
+  // Gera parcela para contratos ATIVOS já iniciados que cobrem o mês.
+  // Contratos com renovação automática entram mesmo se a data_fim atual for
+  // ANTERIOR ao mês (ex.: gerar setembro com contrato vencendo em agosto): como
+  // eles renovam sozinhos, a parcela do mês futuro deve ser criada do mesmo jeito.
   const contratos = await pool.query(`
     SELECT c.id, c.imovel_id, c.valor, i.dia_vencimento
     FROM contratos c JOIN imoveis i ON i.id = c.imovel_id
-    WHERE c.status = 'ativo' AND c.data_inicio <= $2 AND c.data_fim >= $1
+    WHERE c.status = 'ativo'
+      AND c.data_inicio <= $2
+      AND (c.data_fim >= $1 OR c.renovacao_automatica = true)
   `, [inicioMes, fimMes]);
 
   let criadas = 0;
