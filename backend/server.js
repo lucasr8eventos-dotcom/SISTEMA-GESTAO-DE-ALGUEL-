@@ -1535,7 +1535,9 @@ app.get('/api/pagamentos', authenticateToken, async (req, res) => {
     }
 
     if (conditions.length > 0) queryStr += ' WHERE ' + conditions.join(' AND ');
-    queryStr += ' ORDER BY p.ano DESC, p.mes DESC, i.codigo';
+    // Ordena por data de vencimento (mais antigo → mais recente): no mês fica
+    // do dia 1 ao 30, facilitando a leitura.
+    queryStr += ' ORDER BY p.data_vencimento ASC, i.codigo';
 
     const result = await pool.query(queryStr, params);
     res.json(result.rows);
@@ -2979,6 +2981,73 @@ app.get('/api/relatorios/exportar/excel', authenticateToken, async (req, res) =>
       ];
       ws.getRow(1).font = { bold: true };
       result.rows.forEach(row => ws.addRow(row));
+    } else if (tipo === 'imoveis-vagos') {
+      const result = await pool.query(
+        "SELECT codigo, tipo, endereco, valor_sem_desconto, dia_vencimento, status FROM imoveis WHERE status IN ('vago','negociacao') ORDER BY codigo"
+      );
+      const ws = workbook.addWorksheet('Imóveis Vagos');
+      ws.columns = [
+        { header: 'Código', key: 'codigo', width: 12 },
+        { header: 'Tipo', key: 'tipo', width: 14 },
+        { header: 'Endereço', key: 'endereco', width: 40 },
+        { header: 'Valor', key: 'valor_sem_desconto', width: 12 },
+        { header: 'Dia Venc.', key: 'dia_vencimento', width: 10 },
+        { header: 'Status', key: 'status', width: 14 }
+      ];
+      ws.getRow(1).font = { bold: true };
+      result.rows.forEach(row => ws.addRow(row));
+    } else if (tipo === 'contratos-vencendo') {
+      const dias = (/^\d+$/.test(String(req.query.dias || '')) ? req.query.dias : 60);
+      const result = await pool.query(`
+        SELECT i.codigo AS imovel_codigo, inq.nome AS inquilino_nome, inq.telefone AS inquilino_telefone,
+               c.valor, c.data_fim, (c.data_fim - CURRENT_DATE) AS dias_para_vencer
+        FROM contratos c JOIN imoveis i ON i.id=c.imovel_id
+        LEFT JOIN inquilinos inq ON inq.id=c.inquilino_id
+        WHERE c.status='ativo' AND c.data_fim BETWEEN CURRENT_DATE AND (CURRENT_DATE + ($1 || ' days')::interval)
+        ORDER BY c.data_fim
+      `, [String(dias)]);
+      const ws = workbook.addWorksheet('Contratos a Vencer');
+      ws.columns = [
+        { header: 'Imóvel', key: 'imovel_codigo', width: 12 },
+        { header: 'Inquilino', key: 'inquilino_nome', width: 30 },
+        { header: 'Telefone', key: 'inquilino_telefone', width: 16 },
+        { header: 'Valor', key: 'valor', width: 12 },
+        { header: 'Vence em', key: 'data_fim', width: 14 },
+        { header: 'Dias', key: 'dias_para_vencer', width: 8 }
+      ];
+      ws.getRow(1).font = { bold: true };
+      result.rows.forEach(row => ws.addRow(row));
+    } else if (tipo === 'despesas') {
+      const m = (/^\d+$/.test(String(mes || '')) ? mes : null);
+      const a = (/^\d+$/.test(String(ano || '')) ? ano : null);
+      const ps = []; const cond = [];
+      if (m) { ps.push(m); cond.push(`EXTRACT(MONTH FROM d.vencimento)=$${ps.length}`); }
+      if (a) { ps.push(a); cond.push(`EXTRACT(YEAR FROM d.vencimento)=$${ps.length}`); }
+      const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
+      const result = await pool.query(`
+        SELECT i.codigo AS imovel_codigo, COALESCE(dt.nome, d.tipo) AS tipo_nome,
+               d.descricao, d.valor, d.vencimento, d.status
+        FROM despesas d
+        LEFT JOIN imoveis i ON i.id=d.imovel_id
+        LEFT JOIN despesa_tipos dt ON dt.codigo=d.tipo
+        ${where} ORDER BY d.vencimento
+      `, ps);
+      const ws = workbook.addWorksheet('Contas a Pagar');
+      ws.columns = [
+        { header: 'Imóvel', key: 'imovel_codigo', width: 12 },
+        { header: 'Categoria', key: 'tipo_nome', width: 16 },
+        { header: 'Descrição', key: 'descricao', width: 30 },
+        { header: 'Valor', key: 'valor', width: 12 },
+        { header: 'Vencimento', key: 'vencimento', width: 14 },
+        { header: 'Status', key: 'status', width: 12 }
+      ];
+      ws.getRow(1).font = { bold: true };
+      result.rows.forEach(row => ws.addRow(row));
+    }
+
+    // Garante ao menos uma planilha (exceljs quebra sem nenhuma)
+    if (workbook.worksheets.length === 0) {
+      return res.status(400).json({ error: 'Tipo de relatório inválido para exportação.' });
     }
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -3022,14 +3091,41 @@ app.get('/api/relatorios/exportar/pdf', authenticateToken, async (req, res) => {
       );
       rows = result.rows;
       titulo = 'Relatório de Imóveis Vagos';
+    } else if (tipo === 'contratos-vencendo') {
+      const dias = intQ(req.query.dias) || 60;
+      const result = await pool.query(`
+        SELECT i.codigo AS imovel_codigo, inq.nome AS inquilino_nome, c.valor, c.data_fim,
+               (c.data_fim - CURRENT_DATE) AS dias_para_vencer
+        FROM contratos c
+        JOIN imoveis i ON i.id = c.imovel_id
+        LEFT JOIN inquilinos inq ON inq.id = c.inquilino_id
+        WHERE c.status='ativo' AND c.data_fim BETWEEN CURRENT_DATE AND (CURRENT_DATE + ($1 || ' days')::interval)
+        ORDER BY c.data_fim
+      `, [String(dias)]);
+      rows = result.rows;
+      titulo = `Relatório de Contratos a Vencer (${dias} dias)`;
+    } else if (tipo === 'despesas') {
+      const mesN = intQ(mes), anoN = intQ(ano);
+      const ps = []; const cond = [];
+      if (mesN) { ps.push(mesN); cond.push(`EXTRACT(MONTH FROM d.vencimento)=$${ps.length}`); }
+      if (anoN) { ps.push(anoN); cond.push(`EXTRACT(YEAR FROM d.vencimento)=$${ps.length}`); }
+      const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
+      const result = await pool.query(`
+        SELECT i.codigo AS imovel_codigo, COALESCE(dt.nome, d.tipo) AS tipo_nome,
+               d.descricao, d.valor, d.vencimento, d.status
+        FROM despesas d
+        LEFT JOIN imoveis i ON i.id = d.imovel_id
+        LEFT JOIN despesa_tipos dt ON dt.codigo = d.tipo
+        ${where} ORDER BY d.vencimento
+      `, ps);
+      rows = result.rows;
+      titulo = (mesN && anoN) ? `Relatório de Contas a Pagar — ${meses[parseInt(mes) - 1]}/${ano}` : 'Relatório de Contas a Pagar';
     } else {
-      return res.status(400).json({ error: 'Tipo de relatório inválido. Use: mensal, inadimplencia ou imoveis-vagos' });
+      return res.status(400).json({ error: 'Tipo de relatório inválido.' });
     }
 
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Nenhum dado encontrado para os filtros informados' });
-    }
-
+    // Não retorna 404 em período vazio: gera um PDF válido com "0 registros"
+    // (evita aparecer como erro ao exportar).
     const doc = new PDFDocument({ size: 'A4', margin: 40, layout: 'landscape', bufferPages: true });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=relatorio-${tipo}-${Date.now()}.pdf`);
@@ -3060,14 +3156,34 @@ app.get('/api/relatorios/exportar/pdf', authenticateToken, async (req, res) => {
       { key: 'dia_vencimento', label: 'Venc.', w: 60 },
       { key: 'status', label: 'Status', w: 80 }
     ];
-    const defs = tipo === 'mensal' ? defsMensal : tipo === 'inadimplencia' ? defsInad : defsVagos;
+    const defsVencendo = [
+      { key: 'imovel_codigo', label: 'Imóvel', w: 80 },
+      { key: 'inquilino_nome', label: 'Inquilino', w: 240 },
+      { key: 'valor', label: 'Valor', w: 100, money: true },
+      { key: 'data_fim', label: 'Vence em', w: 110, date: true },
+      { key: 'dias_para_vencer', label: 'Dias', w: 70 }
+    ];
+    const defsDespesas = [
+      { key: 'imovel_codigo', label: 'Imóvel', w: 70 },
+      { key: 'tipo_nome', label: 'Categoria', w: 110 },
+      { key: 'descricao', label: 'Descrição', w: 200 },
+      { key: 'valor', label: 'Valor', w: 90, money: true },
+      { key: 'vencimento', label: 'Vencimento', w: 90, date: true },
+      { key: 'status', label: 'Status', w: 80 }
+    ];
+    const defsPorTipo = {
+      mensal: defsMensal, inadimplencia: defsInad, 'imoveis-vagos': defsVagos,
+      'contratos-vencendo': defsVencendo, despesas: defsDespesas
+    };
+    const defs = defsPorTipo[tipo] || defsMensal;
 
     // Período e resumo
     let periodo = `Total de registros: ${rows.length}`;
     if (tipo === 'mensal') periodo = `Período: ${meses[parseInt(mes) - 1]}/${ano}`;
     const resumo = [{ label: 'Registros', valor: String(rows.length) }];
-    if (tipo === 'mensal' || tipo === 'inadimplencia') {
-      const somaValor = rows.reduce((s, r) => s + parseFloat(r.valor_aluguel || 0), 0);
+    const campoValor = tipo === 'despesas' ? 'valor' : (tipo === 'contratos-vencendo' ? 'valor' : 'valor_aluguel');
+    if (['mensal', 'inadimplencia', 'despesas', 'contratos-vencendo'].includes(tipo)) {
+      const somaValor = rows.reduce((s, r) => s + parseFloat(r[campoValor] || 0), 0);
       resumo.unshift({ label: 'Valor total', valor: `R$ ${somaValor.toFixed(2)}` });
     }
 
@@ -3092,6 +3208,11 @@ app.get('/api/relatorios/exportar/pdf', authenticateToken, async (req, res) => {
       doc.y = ly + 4;
     };
     drawHeader();
+
+    if (rows.length === 0) {
+      doc.fontSize(10).font('Helvetica-Oblique').fillColor('#888888')
+        .text('Nenhum registro encontrado para o período/filtro selecionado.', startX, doc.y + 6);
+    }
 
     rows.forEach((row) => {
       if (doc.y > doc.page.height - doc.page.margins.bottom - 24) {

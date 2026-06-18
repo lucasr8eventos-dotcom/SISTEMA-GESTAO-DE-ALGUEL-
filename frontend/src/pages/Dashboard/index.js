@@ -4,16 +4,16 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell
 } from 'recharts';
-import { dashboardService } from '../../services/api';
+import { dashboardService, relatoriosService } from '../../services/api';
 import { formatMoeda, MESES } from '../../utils/format';
 import {
   Home, PieChart as PieIcon, Wallet, AlertTriangle, Clock, TrendingUp, CalendarClock,
   DollarSign, ArrowDownCircle, CheckCircle2, ArrowUpCircle, CreditCard, Building2,
-  FileText, Calendar, AlertCircle
+  Calendar, AlertCircle
 } from 'lucide-react';
 
 // Card de métrica do topo (ícone em círculo + rótulo + valor)
-const DashStat = ({ icon, label, value, color, valueColor, onClick }) => (
+const DashStat = ({ icon, label, value, color, valueColor, sub, onClick }) => (
   <div className="dash-stat" onClick={onClick} style={{ cursor: onClick ? 'pointer' : 'default' }}>
     <div className="dash-stat-icon" style={{ background: `color-mix(in srgb, ${color} 14%, transparent)`, color }}>
       {icon}
@@ -21,6 +21,7 @@ const DashStat = ({ icon, label, value, color, valueColor, onClick }) => (
     <div className="dash-stat-text">
       <div className="dash-stat-label">{label}</div>
       <div className="dash-stat-value" style={{ color: valueColor || 'var(--gray-800)' }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: 'var(--gray-500)', marginTop: 2 }}>{sub}</div>}
     </div>
   </div>
 );
@@ -31,6 +32,7 @@ const RADIAN = Math.PI / 180;
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [evolucao, setEvolucao] = useState([]);
+  const [inad, setInad] = useState(null); // inadimplência consolidada (resumo + lista)
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState(null);
   const navigate = useNavigate();
@@ -39,11 +41,13 @@ export default function Dashboard() {
     const fetchData = async () => {
       setErro(null);
       try {
-        const [statsRes, evolucaoRes] = await Promise.all([
+        const [statsRes, evolucaoRes, inadRes] = await Promise.all([
           dashboardService.stats(),
-          dashboardService.evolucao()
+          dashboardService.evolucao(),
+          relatoriosService.inadimplenciaConsolidada().catch(() => ({ data: null }))
         ]);
         setStats(statsRes.data);
+        setInad(inadRes.data);
 
         const evData = evolucaoRes.data.map(r => ({
           name: `${MESES[r.mes - 1].slice(0, 3)}/${String(r.ano).slice(2)}`,
@@ -147,7 +151,6 @@ export default function Dashboard() {
   // Atalhos rápidos
   const atalhos = [
     { icon: <Building2 size={22} />, color: 'var(--accent)', label: 'Cadastrar Imóvel', onClick: () => navigate('/imoveis') },
-    { icon: <FileText size={22} />, color: 'var(--success)', label: 'Novo Contrato', onClick: () => navigate('/contratos') },
     { icon: <DollarSign size={22} />, color: '#8b5cf6', label: 'Registrar Pagamento', onClick: () => navigate('/pagamentos') },
     { icon: <Calendar size={22} />, color: '#f97316', label: 'Ver Agenda', onClick: () => navigate('/agenda') }
   ];
@@ -176,7 +179,9 @@ export default function Dashboard() {
           color="var(--accent)" valueColor="var(--accent)" onClick={() => navigate('/pagamentos?status=pendente')}
         />
         <DashStat
-          icon={<AlertTriangle size={24} />} label="Em Aberto (total)" value={formatMoeda(stats.totalEmAberto ?? stats.valorAberto)}
+          icon={<AlertTriangle size={24} />} label="Inadimplência (em aberto)"
+          value={formatMoeda(stats.totalEmAberto ?? stats.valorAberto)}
+          sub={inad?.resumo ? `${inad.resumo.total_inquilinos} inquilino(s) devendo` : null}
           color="#f97316" valueColor="#f97316" onClick={() => navigate('/inadimplencia')}
         />
       </div>
@@ -194,6 +199,37 @@ export default function Dashboard() {
                 <span className="dash-alert-text" style={{ color: a.color }}>{a.texto}</span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Inadimplência — maiores devedores */}
+      {inad?.inquilinos?.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-header">
+            <span className="card-title">Inadimplência — maiores devedores</span>
+            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/inadimplencia')}>
+              Ver todos ({inad.resumo.total_inquilinos})
+            </button>
+          </div>
+          <div className="card-body">
+            <div className="dash-resumo">
+              {inad.inquilinos.slice(0, 5).map((g, i) => (
+                <div
+                  key={g.inquilino_id || `x${i}`}
+                  className="dash-resumo-row"
+                  onClick={() => navigate('/inadimplencia')}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <span className="dash-resumo-icon" style={{ color: 'var(--danger)' }}><AlertTriangle size={16} /></span>
+                  <span className="dash-resumo-label">
+                    {g.inquilino_nome}
+                    <span style={{ color: 'var(--gray-500)', fontSize: 12 }}> · {g.meses_em_aberto} mês(es)</span>
+                  </span>
+                  <span className="dash-resumo-value" style={{ color: 'var(--danger)' }}>{formatMoeda(g.total_devido)}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
