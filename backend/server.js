@@ -298,6 +298,19 @@ const gerarParcelasMensais = async (mes, ano) => {
   return { criadas, contratos: contratos.rows.length };
 };
 
+// Ao criar/alugar um contrato, garante as parcelas do MÊS ATUAL e também do
+// MÊS DE INÍCIO do contrato (quando o contrato começa no futuro) — assim a
+// primeira parcela já aparece, sem precisar gerar na mão. Idempotente.
+const gerarParcelasContratoNovo = async (dataInicio) => {
+  const agora = new Date();
+  await gerarParcelasMensais(agora.getMonth() + 1, agora.getFullYear()).catch(() => {});
+  if (dataInicio) {
+    const [y, m] = String(dataInicio).split('-').map(Number);
+    const futuro = y && m && (y > agora.getFullYear() || (y === agora.getFullYear() && m > agora.getMonth() + 1));
+    if (futuro) await gerarParcelasMensais(m, y).catch(() => {});
+  }
+};
+
 const sincronizarStatusVencidos = async () => {
   try {
     // 1) RENOVAÇÃO AUTOMÁTICA ANUAL: contratos ativos com renovação ligada
@@ -769,8 +782,7 @@ app.post('/api/imoveis/:id/alugar', authenticateToken, [
     await client.query("UPDATE imoveis SET status='alugado' WHERE id=$1", [id]);
     await client.query('COMMIT');
 
-    const agora = new Date();
-    await gerarParcelasMensais(agora.getMonth() + 1, agora.getFullYear()).catch(() => {});
+    await gerarParcelasContratoNovo(contrato.data_inicio);
     await logAtividade(req.user.id, 'alugar_imovel', 'imoveis', parseInt(id), `contrato ${cRes.rows[0].id}`, req.ip);
     res.status(201).json({ contrato: cRes.rows[0], inquilino_id: inquilinoId, inquilino_reaproveitado: inquilinoReuso });
   } catch (error) {
@@ -867,10 +879,9 @@ app.post('/api/imoveis/cadastro-completo', authenticateToken, async (req, res) =
 
     await client.query('COMMIT');
 
-    // Pós-commit (idempotente): gera a parcela do mês corrente para o novo contrato
+    // Pós-commit (idempotente): gera a parcela do mês atual e do mês de início
     if (vincular) {
-      const agora = new Date();
-      await gerarParcelasMensais(agora.getMonth() + 1, agora.getFullYear()).catch(() => {});
+      await gerarParcelasContratoNovo(contrato.data_inicio);
     }
     await logAtividade(req.user.id, 'cadastro_completo', 'imoveis', novoImovel.id,
       vincular ? 'imóvel+inquilino+contrato' : 'imóvel', req.ip);
@@ -1321,9 +1332,8 @@ app.post('/api/contratos', authenticateToken, upload.single('arquivo_pdf'), [
 
     if (status === 'ativo') {
       await pool.query("UPDATE imoveis SET status='alugado' WHERE id=$1", [imovel_id]);
-      // Já cria a parcela do mês corrente para o contrato novo (idempotente)
-      const agora = new Date();
-      await gerarParcelasMensais(agora.getMonth() + 1, agora.getFullYear()).catch(() => {});
+      // Cria a parcela do mês atual e do mês de início do contrato (idempotente)
+      await gerarParcelasContratoNovo(data_inicio);
     }
 
     await logAtividade(req.user.id, 'criar_contrato', 'contratos', result.rows[0].id, null, req.ip);
