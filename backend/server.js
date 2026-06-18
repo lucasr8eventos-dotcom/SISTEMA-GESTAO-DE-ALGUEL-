@@ -85,12 +85,29 @@ pool.connect((err, client, release) => {
   }
 });
 
+// Sem este handler, um erro num client OCIOSO (ex.: o Postgres derruba a conexão)
+// emite um 'error' não tratado no pool e DERRUBA o processo Node. Aqui apenas
+// logamos — o pool recria a conexão sozinho. Evita "colapso" por queda de rede.
+pool.on('error', (err) => {
+  console.error('⚠️  Erro inesperado em client ocioso do pool:', err.message);
+});
+
 // ============================================================
 // UPLOAD DE ARQUIVOS
 // ============================================================
 
-const uploadDir = process.env.UPLOAD_DIR || 'uploads';
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+// Diretório de anexos. Idealmente um VOLUME persistente (ver .env.example),
+// senão os PDFs somem a cada redeploy no Railway. Se o caminho configurado não
+// puder ser criado (volume não montado), cai num fallback local e avisa, em vez
+// de derrubar o boot do servidor.
+let uploadDir = process.env.UPLOAD_DIR || 'uploads';
+try {
+  if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+} catch (e) {
+  console.error(`⚠️  Não consegui usar UPLOAD_DIR="${uploadDir}" (${e.message}). Usando "uploads" local — ATENÇÃO: anexos podem não persistir.`);
+  uploadDir = 'uploads';
+  if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+}
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
@@ -3840,3 +3857,14 @@ const shutdown = (signal) => {
 };
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+
+// Rede de segurança: a partir do Node 15, uma Promise rejeitada sem catch
+// DERRUBA o processo. Aqui logamos e seguimos — uma falha pontual numa
+// requisição não tira o sistema do ar (os dados já commitados estão a salvo
+// no Postgres). Erros graves o Railway reinicia sozinho.
+process.on('unhandledRejection', (reason) => {
+  console.error('⚠️  Promise rejeitada sem tratamento:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('⚠️  Exceção não capturada:', err);
+});
