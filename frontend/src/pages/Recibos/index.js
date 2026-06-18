@@ -7,7 +7,8 @@ import { MoneyInput, CpfCnpjInput, PhoneInput } from '../../components/MaskedInp
 import Pagination, { PER_PAGE } from '../../components/Pagination';
 import { EmptyState, ErrorState } from '../../components/StateViews';
 import { formatMoeda, formatData } from '../../utils/format';
-import { valorPorExtenso, FORMAS_PAGAMENTO_RECIBO, formaReciboLabel } from '../../utils/extenso';
+import { validarCpfCnpj } from '../../utils/masks';
+import { valorPorExtenso, FORMAS_PAGAMENTO_RECIBO, formaReciboLabel, capitalizar } from '../../utils/extenso';
 import { ReceiptText, Download, Trash2, Pencil, Users, Building2, Plus, FileText } from 'lucide-react';
 
 const hoje = () => new Date().toISOString().split('T')[0];
@@ -41,10 +42,19 @@ export default function Recibos() {
   const [proximo, setProximo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState(null);
-  const [form, setForm] = useState(FORM_INICIAL);
+  // Local (cidade) começa com o último usado pelo usuário (lembrado no navegador),
+  // caindo para "Brasília" só na primeira vez.
+  const [form, setForm] = useState(() => ({
+    ...FORM_INICIAL,
+    local: localStorage.getItem('recibo_local') || FORM_INICIAL.local
+  }));
   const [gerando, setGerando] = useState(false);
   const [page, setPage] = useState(1);
   const [confirmExcluir, setConfirmExcluir] = useState(null);
+  // Filtros do histórico de recibos
+  const [buscaHist, setBuscaHist] = useState('');
+  const [histDataIni, setHistDataIni] = useState('');
+  const [histDataFim, setHistDataFim] = useState('');
 
   // Modais de gerenciamento
   const [recManagerOpen, setRecManagerOpen] = useState(false);
@@ -80,6 +90,7 @@ export default function Recibos() {
   }, []);
 
   useEffect(() => { carregar(); }, [carregar]);
+  useEffect(() => { setPage(1); }, [buscaHist, histDataIni, histDataFim]);
 
   const recarregarRecebedores = async () => {
     const r = await recibosService.listarRecebedores();
@@ -123,6 +134,16 @@ export default function Recibos() {
       toast.error('Informe a que se refere o pagamento');
       return;
     }
+    // Documento é opcional, mas se informado deve ser um CPF/CNPJ válido
+    // (evita recibos com documento inconsistente).
+    if (form.recebedorSel === 'manual' && form.recebedor_documento && !validarCpfCnpj(form.recebedor_documento)) {
+      toast.error('CPF/CNPJ do recebedor é inválido');
+      return;
+    }
+    if (form.pagadorSel === 'manual' && form.pagador_documento && !validarCpfCnpj(form.pagador_documento)) {
+      toast.error('CPF/CNPJ do pagador é inválido');
+      return;
+    }
 
     const payload = {
       valor: parseFloat(form.valor),
@@ -150,6 +171,7 @@ export default function Recibos() {
     setGerando(true);
     try {
       const res = await recibosService.criar(payload);
+      if (form.local) localStorage.setItem('recibo_local', form.local); // lembra a cidade
       toast.success(`Recibo Nº ${String(res.data.numero).padStart(4, '0')} gerado!`);
       await baixarPdf(res.data);
       // limpa campos do pagamento mantendo o recebedor escolhido
@@ -178,7 +200,22 @@ export default function Recibos() {
     }
   };
 
-  const paginados = recibos.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+  const recibosFiltrados = useMemo(() => {
+    const t = buscaHist.trim().toLowerCase();
+    return recibos.filter((r) => {
+      if (t) {
+        const alvo = `${String(r.numero).padStart(4, '0')} ${r.pagador_nome || ''} ${r.recebedor_nome || ''} ${r.referente || ''}`.toLowerCase();
+        if (!alvo.includes(t)) return false;
+      }
+      const dp = r.data_pagamento ? r.data_pagamento.split('T')[0] : '';
+      if (histDataIni && (!dp || dp < histDataIni)) return false;
+      if (histDataFim && (!dp || dp > histDataFim)) return false;
+      return true;
+    });
+  }, [recibos, buscaHist, histDataIni, histDataFim]);
+
+  const histFiltroAtivo = !!(buscaHist || histDataIni || histDataFim);
+  const paginados = recibosFiltrados.slice((page - 1) * PER_PAGE, page * PER_PAGE);
   const recebedorSelObj = recebedores.find((r) => String(r.id) === form.recebedorSel);
 
   return (
@@ -291,8 +328,8 @@ export default function Recibos() {
                 <label className="form-label">Valor <span className="required">*</span></label>
                 <MoneyInput value={form.valor} onChange={(v) => setF('valor', v)} />
                 {extensoPreview && (
-                  <div className="form-hint" style={{ marginTop: 4, fontStyle: 'italic', textTransform: 'capitalize' }}>
-                    {extensoPreview}
+                  <div className="form-hint" style={{ marginTop: 4, fontStyle: 'italic' }}>
+                    {capitalizar(extensoPreview)}
                   </div>
                 )}
               </div>
@@ -337,6 +374,25 @@ export default function Recibos() {
 
         {/* ===== Lista de recibos emitidos ===== */}
         <div className="card">
+          {!loading && recibos.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '12px 16px', borderBottom: '1px solid var(--gray-100)', alignItems: 'flex-end' }}>
+              <div className="filter-field" style={{ flex: '1 1 220px' }}>
+                <label className="filter-label">Buscar</label>
+                <input className="form-control" value={buscaHist} onChange={(e) => setBuscaHist(e.target.value)} placeholder="Nº, pagador, recebedor ou referente..." />
+              </div>
+              <div className="filter-field">
+                <label className="filter-label">De</label>
+                <input type="date" className="form-control" value={histDataIni} onChange={(e) => setHistDataIni(e.target.value)} title="Data inicial (pagamento)" />
+              </div>
+              <div className="filter-field">
+                <label className="filter-label">Até</label>
+                <input type="date" className="form-control" value={histDataFim} onChange={(e) => setHistDataFim(e.target.value)} title="Data final (pagamento)" />
+              </div>
+              {histFiltroAtivo && (
+                <button className="btn btn-ghost btn-sm" onClick={() => { setBuscaHist(''); setHistDataIni(''); setHistDataFim(''); }}>Limpar</button>
+              )}
+            </div>
+          )}
           <div className="table-wrapper">
             {loading ? (
               <div className="loading-spinner"><div className="spinner" /></div>
@@ -345,6 +401,12 @@ export default function Recibos() {
                 icon={<ReceiptText size={48} />}
                 title="Nenhum recibo emitido"
                 message="Preencha o formulário acima para gerar seu primeiro recibo."
+              />
+            ) : recibosFiltrados.length === 0 ? (
+              <EmptyState
+                icon={<ReceiptText size={48} />}
+                title="Nenhum recibo encontrado"
+                message="Nenhum recibo corresponde aos filtros. Ajuste a busca ou o período."
               />
             ) : (
               <table>
@@ -383,7 +445,7 @@ export default function Recibos() {
               </table>
             )}
           </div>
-          <Pagination total={recibos.length} page={page} perPage={PER_PAGE} onChange={setPage} />
+          <Pagination total={recibosFiltrados.length} page={page} perPage={PER_PAGE} onChange={setPage} />
         </div>
       </div>
 
@@ -459,6 +521,7 @@ function RecebedorManager({ isOpen, onClose, recebedores, onChange, toast, isAdm
   const salvar = async (e) => {
     e.preventDefault();
     if (!form.nome.trim()) { toast.error('Informe o nome'); return; }
+    if (form.documento && !validarCpfCnpj(form.documento)) { toast.error('CNPJ/CPF inválido'); return; }
     setSalvando(true);
     try {
       if (editando) {
@@ -613,6 +676,7 @@ function PagadorManager({ isOpen, onClose, pagadores, onChange, toast, isAdmin }
   const salvar = async (e) => {
     e.preventDefault();
     if (!form.nome.trim()) { toast.error('Informe o nome'); return; }
+    if (form.documento && !validarCpfCnpj(form.documento)) { toast.error('CPF/CNPJ inválido'); return; }
     setSalvando(true);
     try {
       if (editando) {

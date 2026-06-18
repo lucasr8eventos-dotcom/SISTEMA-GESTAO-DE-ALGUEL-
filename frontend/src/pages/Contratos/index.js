@@ -11,7 +11,7 @@ import { Pencil, Trash2, Paperclip, FileText, CheckCircle2, AlertCircle, Clock, 
 
 const FORM_INICIAL = {
   imovel_id: '', inquilino_id: '', data_inicio: '', data_fim: '',
-  valor: '', garantia: 'fiador', status: 'ativo', renovacao_automatica: true, observacoes: '', arquivo_pdf: null
+  valor: '', garantia: 'fiador', status: 'ativo', renovacao_automatica: false, observacoes: '', arquivo_pdf: null
 };
 
 const FORM_REAJUSTE_INICIAL = {

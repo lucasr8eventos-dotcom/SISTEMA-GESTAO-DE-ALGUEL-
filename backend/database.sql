@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS contratos (
     valor DECIMAL(10,2) NOT NULL,
     garantia VARCHAR(50) NOT NULL CHECK (garantia IN ('caucao', 'fiador', 'seguro', 'sem', 'outro')),
     status VARCHAR(50) NOT NULL DEFAULT 'ativo' CHECK (status IN ('ativo', 'vencido', 'encerrado')),
-    renovacao_automatica BOOLEAN NOT NULL DEFAULT true, -- renova +1 ano ao vencer, a não ser que o contrato seja inativado
+    renovacao_automatica BOOLEAN NOT NULL DEFAULT false, -- opt-in: se ligado, renova +1 ano ao vencer; padrão é vencer normalmente
     arquivo_pdf VARCHAR(500),
     observacoes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -276,6 +276,17 @@ BEGIN
   END IF;
 END $$;
 
+-- Sequência PERENE de numeração de recibos: atômica e nunca regride, mesmo que
+-- o recibo de maior número seja excluído depois (não reutiliza número emitido).
+DO $$
+DECLARE mx INTEGER;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_class WHERE relkind='S' AND relname='recibos_numero_seq') THEN
+    SELECT COALESCE(MAX(numero), 0) INTO mx FROM recibos;
+    EXECUTE format('CREATE SEQUENCE recibos_numero_seq START WITH %s', GREATEST(mx + 1, 1));
+  END IF;
+END $$;
+
 -- ============================================================
 -- TRIGGERS updated_at
 -- ============================================================
@@ -345,12 +356,10 @@ ORDER BY dias_atraso DESC;
 -- ============================================================
 
 -- Usuário administrador inicial.
--- Senha padrão: admin123 (bcryptjs hash, rounds=10).
--- ⚠️  TROQUE ESTA SENHA NO PRIMEIRO ACESSO (tela Usuários). Operadores devem
---     ser criados pela interface — nenhum usuário de senha pública é semeado.
-INSERT INTO usuarios (nome, email, senha, perfil, status) VALUES
-('Administrador', 'admin@sistema.com', '$2a$10$Mr3zId.1uxChJYHuP7zXk.rnsHpbZWl7p0WMuSSvwmZIuy6mhrGf2', 'admin', 'ativo')
-ON CONFLICT (email) DO NOTHING;
+-- ⚠️  NENHUMA senha é semeada aqui de propósito (este arquivo é público).
+--     O admin é criado no boot pelo servidor (bootstrapAdmin) usando a senha
+--     definida em ADMIN_PASSWORD ou, na ausência dela, uma senha ALEATÓRIA
+--     exibida UMA vez no log do servidor. Veja backend/server.js.
 
 -- Categorias padrão de contas a pagar
 INSERT INTO despesa_tipos (codigo, nome) VALUES
