@@ -18,14 +18,14 @@ TRUNCATE recibos, reajustes, pagamentos, despesas, agenda_eventos,
          contratos, inquilinos, imoveis, recibo_recebedores, recibo_pagadores
   RESTART IDENTITY CASCADE;
 
--- 2) IMÓVEIS (situações variadas para a demonstração)
-INSERT INTO imoveis (codigo, tipo, endereco, valor_sem_desconto, valor_com_desconto, dia_vencimento, status, numero_iptu) VALUES
-('IM001', 'apartamento', 'Av. Paulista, 1000 - Apto 72, Bela Vista',      2800.00, 2700.00, 10, 'alugado',    'IPTU-1001'),
-('IM002', 'casa',        'Rua das Acácias, 245, Jardim Europa',           4200.00, NULL,    5,  'alugado',    'IPTU-1002'),
-('IM003', 'apartamento', 'Rua Augusta, 1500 - Apto 31, Consolação',       2300.00, 2200.00, 15, 'alugado',    'IPTU-1003'),
-('IM004', 'comercial',   'Av. Brigadeiro Faria Lima, 800 - Sala 12',      6500.00, NULL,    10, 'vago',       'IPTU-1004'),
-('IM005', 'apartamento', 'Rua Oscar Freire, 200 - Apto 5, Jardins',       3100.00, 3000.00, 20, 'manutencao', 'IPTU-1005'),
-('IM006', 'casa',        'Rua dos Pinheiros, 90, Pinheiros',              3800.00, NULL,    8,  'negociacao', 'IPTU-1006');
+-- 2) IMÓVEIS (situações variadas + cadastro COMPLETO para a demonstração)
+INSERT INTO imoveis (codigo, tipo, endereco, valor_sem_desconto, valor_com_desconto, dia_vencimento, status, numero_iptu, matricula, conta_agua, conta_energia, observacoes) VALUES
+('IM001', 'apartamento', 'Av. Paulista, 1000 - Apto 72, Bela Vista',      2800.00, 2700.00, 10, 'alugado',    'IPTU-1001', 'MAT-45.123', 'SABESP 0011223344', 'ENEL 99001122', 'Apartamento mobiliado, 2 vagas de garagem e varanda.'),
+('IM002', 'casa',        'Rua das Acácias, 245, Jardim Europa',           4200.00, NULL,    5,  'alugado',    'IPTU-1002', 'MAT-78.456', 'SABESP 0022334455', 'ENEL 99002233', 'Casa térrea com quintal e churrasqueira.'),
+('IM003', 'apartamento', 'Rua Augusta, 1500 - Apto 31, Consolação',       2300.00, 2200.00, 15, 'alugado',    'IPTU-1003', 'MAT-12.789', 'SABESP 0033445566', 'ENEL 99003344', 'Próximo ao metrô, 1 dormitório.'),
+('IM004', 'comercial',   'Av. Brigadeiro Faria Lima, 800 - Sala 12',      6500.00, NULL,    10, 'vago',       'IPTU-1004', 'MAT-33.901', 'SABESP 0044556677', 'ENEL 99004455', 'Sala comercial, ar-condicionado central.'),
+('IM005', 'apartamento', 'Rua Oscar Freire, 200 - Apto 5, Jardins',       3100.00, 3000.00, 20, 'manutencao', 'IPTU-1005', 'MAT-66.234', 'SABESP 0055667788', 'ENEL 99005566', 'Em reforma (pintura e hidráulica) até o próximo mês.'),
+('IM006', 'casa',        'Rua dos Pinheiros, 90, Pinheiros',              3800.00, NULL,    8,  'negociacao', 'IPTU-1006', 'MAT-90.567', 'SABESP 0066778899', 'ENEL 99006677', 'Em negociação com possível inquilino.');
 
 -- 3) INQUILINOS
 INSERT INTO inquilinos (nome, cpf_cnpj, telefone, email) VALUES
