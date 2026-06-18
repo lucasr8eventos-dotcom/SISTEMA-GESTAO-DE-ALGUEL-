@@ -375,7 +375,10 @@ export default function Pagamentos() {
         : `recibos-${filtroMes}-${filtroAno}.pdf`;
       downloadBlob(res.data, nomeArquivo);
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Erro ao gerar recibos');
+      // resposta é blob (responseType), então a mensagem de erro vem como texto JSON
+      let msg = 'Erro ao gerar recibos';
+      try { msg = JSON.parse(await err.response.data.text()).error || msg; } catch (_) {}
+      toast.error(msg);
     }
   };
 
