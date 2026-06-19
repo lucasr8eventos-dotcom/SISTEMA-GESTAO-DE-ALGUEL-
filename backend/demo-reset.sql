@@ -65,7 +65,7 @@ BEGIN
   (EXTRACT(MONTH FROM d0)::int, EXTRACT(YEAR FROM d0)::int, 3,3,2200.00, venc_atual, (CURRENT_DATE)::date, 1100.00,'pix','parcial');
 END $$;
 
--- 6) CONTAS A PAGAR (despesas): uma paga, uma a vencer no mês, uma atrasada
+-- 6) CONTAS A PAGAR (despesas): uma paga, uma a vencer, uma atrasada e uma PARCIAL
 DO $$
 DECLARE
   d0 date := date_trunc('month', CURRENT_DATE)::date;
@@ -76,6 +76,9 @@ BEGIN
   (1, 'iptu',       320.00, d1+19, 'pago',     'IPTU 2026 - parcela', d1+18, 320.00, 'boleto'),
   (1, 'condominio', 650.00, venc_atual,  'pendente', 'Condomínio do mês', NULL, NULL, NULL),
   (2, 'manutencao', 480.00, d1+9,  'atrasado', 'Reparo no telhado', NULL, NULL, NULL),
+  -- PARCIAL: conta de R$ 800,00 com R$ 500,00 já pagos (faltam R$ 300,00) →
+  -- alimenta o card "Parcial" no Contas a Pagar, igual ao de Pagamentos.
+  (3, 'condominio', 800.00, venc_atual, 'parcial', 'Condomínio (pago parcial)', (CURRENT_DATE)::date, 500.00, 'pix'),
   (NULL,'outros',   150.00, venc_atual, 'pendente', 'Taxa administrativa', NULL, NULL, NULL);
 END $$;
 

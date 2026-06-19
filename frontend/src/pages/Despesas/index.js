@@ -259,6 +259,7 @@ export default function Despesas() {
   const resumir = (lista) => {
     const counts = { pendente: 0, pago: 0, atrasado: 0, parcial: 0 };
     let total = 0, pago = 0, aberto = 0, atrasado = 0, proximas = 0;
+    let totalParcial = 0, pagoParcial = 0;
     lista.forEach((d) => {
       counts[d.status] = (counts[d.status] || 0) + 1;
       total += parseFloat(d.valor || 0);
@@ -270,10 +271,15 @@ export default function Despesas() {
       const falta = faltaDe(d);
       if (d.status !== 'pago') aberto += falta;
       if (d.status === 'atrasado') atrasado += falta;
+      // Parcial: quanto já foi pago e o valor total dessas contas (para o card)
+      if (d.status === 'parcial') {
+        totalParcial += parseFloat(d.valor || 0);
+        pagoParcial += parseFloat(d.valor_pago || 0);
+      }
       const dias = diasAteVencimento(d.vencimento);
       if ((d.status === 'pendente' || d.status === 'parcial') && dias !== null && dias >= 0 && dias <= ALERTA_DIAS) proximas += 1;
     });
-    return { counts, total, pago, aberto, atrasado, proximas };
+    return { counts, total, pago, aberto, atrasado, proximas, totalParcial, pagoParcial };
   };
 
   // ===== Filtros client-side (afetam só a tabela): status + tipo + imóvel =====
@@ -339,6 +345,17 @@ export default function Despesas() {
           onClick={() => setFiltroStatus(filtroStatus === 'pendente' ? '' : 'pendente')}
         />
         <MetricCard label="Atrasado" value={formatMoeda(stats.atrasado)} color="var(--danger)" active={filtroStatus === 'atrasado'} onClick={() => setFiltroStatus(filtroStatus === 'atrasado' ? '' : 'atrasado')} />
+        {stats.counts.parcial > 0 && (
+          <MetricCard
+            label={`Parcial (${stats.counts.parcial})`}
+            value={formatMoeda(stats.pagoParcial)}
+            color="var(--info)"
+            progress={{ pago: stats.pagoParcial, total: stats.totalParcial }}
+            hint={`de ${formatMoeda(stats.totalParcial)} totais`}
+            active={filtroStatus === 'parcial'}
+            onClick={() => setFiltroStatus(filtroStatus === 'parcial' ? '' : 'parcial')}
+          />
+        )}
       </div>
 
       {/* Filtros */}
