@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
+import MobileNav from './MobileNav';
 
 const pageTitles = {
   '/': { title: 'Dashboard', subtitle: 'Resumo geral dos imóveis, contratos, pagamentos e pendências.' },
@@ -51,6 +52,7 @@ export default function Layout({ children }) {
           {children}
         </main>
       </div>
+      <MobileNav />
     </div>
   );
 }

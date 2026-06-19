@@ -1,11 +1,18 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { Menu, Sun, Moon } from 'lucide-react';
+import { Menu, Sun, Moon, LogOut } from 'lucide-react';
 
 export default function Topbar({ title, subtitle, collapsed, onToggleSidebar }) {
-  const { usuario } = useAuth();
+  const { usuario, logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
 
   const initials = usuario?.nome
     ? usuario.nome.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()
@@ -15,7 +22,7 @@ export default function Topbar({ title, subtitle, collapsed, onToggleSidebar }) 
     <header className={`topbar${collapsed ? ' sidebar-collapsed' : ''}`}>
       <div className="topbar-left">
         <button
-          className="btn btn-ghost btn-icon"
+          className="btn btn-ghost btn-icon topbar-menu-btn"
           onClick={onToggleSidebar}
           title="Expandir/Recolher menu"
         >
@@ -42,6 +49,14 @@ export default function Topbar({ title, subtitle, collapsed, onToggleSidebar }) 
             <div className="user-role">{usuario?.perfil === 'admin' ? 'Administrador' : 'Operador'}</div>
           </div>
         </div>
+        <button
+          className="theme-toggle topbar-logout-btn"
+          onClick={handleLogout}
+          title="Sair"
+          aria-label="Sair"
+        >
+          <LogOut size={18} />
+        </button>
       </div>
     </header>
   );
