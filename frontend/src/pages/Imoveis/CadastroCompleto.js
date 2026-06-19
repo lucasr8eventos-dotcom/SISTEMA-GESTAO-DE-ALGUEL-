@@ -40,16 +40,18 @@ export default function CadastroCompleto({ isOpen, onClose, onDone, toast, codig
   const setQ = (c, v) => setInquilino((p) => ({ ...p, [c]: v }));
   const setC = (c, v) => setContrato((p) => ({ ...p, [c]: v }));
 
-  // Etapas: pula Contrato (3) quando não for vincular
-  const proximoStep = (s) => (s === 2 && !vincular ? 4 : s + 1);
-  const anteriorStep = (s) => (s === 4 && !vincular ? 2 : s - 1);
+  // "Só o imóvel": pula Inquilino (2) e Contrato (3), indo direto para a Revisão (4)
+  const proximoStep = (s) => (!vincular ? 4 : s + 1);
+  const anteriorStep = (s) => (!vincular && s === 4 ? 1 : s - 1);
 
   const validarStep = () => {
     if (step === 1) {
       if (!imovel.codigo.trim()) return 'Informe o código do imóvel';
       if ((imovel.endereco || '').trim().length < 5) return 'Endereço muito curto';
-      if (!imovel.valor_sem_desconto) return 'Informe o valor do aluguel';
-      if (!imovel.dia_vencimento) return 'Informe o dia de vencimento';
+      // Aluguel e vencimento só são obrigatórios quando for cadastrar o contrato
+      // junto. No modo "só o imóvel" eles ficam opcionais.
+      if (vincular && !imovel.valor_sem_desconto) return 'Informe o valor do aluguel';
+      if (vincular && !imovel.dia_vencimento) return 'Informe o dia de vencimento';
     }
     if (step === 2 && vincular) {
       if (!inquilino.nome.trim()) return 'Informe o nome do inquilino';
@@ -144,7 +146,7 @@ export default function CadastroCompleto({ isOpen, onClose, onDone, toast, codig
           const n = i + 1;
           const ativo = n === step;
           const feito = n < step;
-          const pulado = n === 3 && !vincular;
+          const pulado = (n === 2 || n === 3) && !vincular;
           return (
             <div key={nome} style={{ flex: 1, textAlign: 'center', opacity: pulado ? 0.4 : 1 }}>
               <div style={{
@@ -162,6 +164,17 @@ export default function CadastroCompleto({ isOpen, onClose, onDone, toast, codig
       {/* Etapa 1 — Imóvel */}
       {step === 1 && (
         <div>
+          {/* Escolha do tipo de cadastro logo no início, para já refletir nos campos abaixo */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16, padding: 12, background: 'var(--gray-50)', borderRadius: 'var(--radius)' }}>
+            <label className="checkbox-inline" style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' }}>
+              <input type="radio" name="modoCadastro" checked={vincular} onChange={() => setVincular(true)} style={{ marginTop: 3 }} />
+              <span><strong>Imóvel + inquilino + contrato</strong><br /><span style={{ fontSize: 12, color: 'var(--gray-500)' }}>Cadastra tudo de uma vez e já deixa o imóvel alugado.</span></span>
+            </label>
+            <label className="checkbox-inline" style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' }}>
+              <input type="radio" name="modoCadastro" checked={!vincular} onChange={() => { setVincular(false); setImovel((p) => ({ ...p, valor_sem_desconto: '', valor_com_desconto: '', dia_vencimento: '' })); }} style={{ marginTop: 3 }} />
+              <span><strong>Apenas o imóvel</strong><br /><span style={{ fontSize: 12, color: 'var(--gray-500)' }}>Cadastra como vago, sem aluguel/vencimento. Você define isso depois ao alugar.</span></span>
+            </label>
+          </div>
           <div className="form-grid">
             <div className="form-group">
               <label className="form-label">Código <span className="required">*</span></label>
@@ -182,20 +195,22 @@ export default function CadastroCompleto({ isOpen, onClose, onDone, toast, codig
             <label className="form-label">Endereço completo <span className="required">*</span></label>
             <input className="form-control" value={imovel.endereco} onChange={(e) => setI('endereco', e.target.value)} />
           </div>
-          <div className="form-grid-3">
-            <div className="form-group">
-              <label className="form-label">Valor do aluguel <span className="required">*</span></label>
-              <MoneyInput value={imovel.valor_sem_desconto} onChange={(v) => setI('valor_sem_desconto', v)} />
+          {vincular && (
+            <div className="form-grid-3">
+              <div className="form-group">
+                <label className="form-label">Valor do aluguel <span className="required">*</span></label>
+                <MoneyInput value={imovel.valor_sem_desconto} onChange={(v) => setI('valor_sem_desconto', v)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Valor com desconto</label>
+                <MoneyInput value={imovel.valor_com_desconto} onChange={(v) => setI('valor_com_desconto', v)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Dia de vencimento <span className="required">*</span></label>
+                <input className="form-control" type="number" min={1} max={31} value={imovel.dia_vencimento} onChange={(e) => setI('dia_vencimento', e.target.value)} />
+              </div>
             </div>
-            <div className="form-group">
-              <label className="form-label">Valor com desconto</label>
-              <MoneyInput value={imovel.valor_com_desconto} onChange={(v) => setI('valor_com_desconto', v)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Dia de vencimento <span className="required">*</span></label>
-              <input className="form-control" type="number" min={1} max={31} value={imovel.dia_vencimento} onChange={(e) => setI('dia_vencimento', e.target.value)} />
-            </div>
-          </div>
+          )}
           <div className="form-grid">
             <div className="form-group">
               <label className="form-label">IPTU</label>
@@ -226,10 +241,6 @@ export default function CadastroCompleto({ isOpen, onClose, onDone, toast, codig
       {/* Etapa 2 — Inquilino */}
       {step === 2 && (
         <div>
-          <label className="checkbox-inline" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14, padding: 10, background: 'var(--gray-50)', borderRadius: 'var(--radius)' }}>
-            <input type="checkbox" checked={vincular} onChange={(e) => setVincular(e.target.checked)} />
-            Cadastrar inquilino e contrato agora (desmarque para cadastrar só o imóvel vago)
-          </label>
           {vincular ? (
             <>
               <div className="form-group">
@@ -313,8 +324,8 @@ export default function CadastroCompleto({ isOpen, onClose, onDone, toast, codig
           <h4 style={{ margin: '0 0 6px' }}>Imóvel</h4>
           <Row label="Código / Tipo" value={`${imovel.codigo} · ${imovel.tipo}`} />
           <Row label="Endereço" value={imovel.endereco} />
-          <Row label="Aluguel" value={formatMoeda(imovel.valor_com_desconto || imovel.valor_sem_desconto)} />
-          <Row label="Dia de vencimento" value={imovel.dia_vencimento} />
+          {vincular && <Row label="Aluguel" value={formatMoeda(imovel.valor_com_desconto || imovel.valor_sem_desconto)} />}
+          {vincular && <Row label="Dia de vencimento" value={imovel.dia_vencimento} />}
 
           {vincular ? (
             <>

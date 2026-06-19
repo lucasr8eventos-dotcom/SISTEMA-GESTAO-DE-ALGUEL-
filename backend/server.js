@@ -693,8 +693,8 @@ app.post('/api/imoveis', authenticateToken, [
   body('codigo').trim().isLength({ min: 1, max: 100 }),
   body('tipo').isIn(['casa', 'apartamento', 'comercial', 'terreno', 'galpao']),
   body('endereco').trim().isLength({ min: 5 }),
-  body('valor_sem_desconto').isFloat({ min: 0 }),
-  body('dia_vencimento').isInt({ min: 1, max: 31 }),
+  body('valor_sem_desconto').optional({ values: 'falsy' }).isFloat({ min: 0 }),
+  body('dia_vencimento').optional({ values: 'falsy' }).isInt({ min: 1, max: 31 }),
   body('status').isIn(['alugado', 'vago', 'encerrado', 'negociacao', 'manutencao'])
 ], validate, async (req, res) => {
   try {
@@ -716,8 +716,8 @@ app.post('/api/imoveis', authenticateToken, [
       `INSERT INTO imoveis (codigo, tipo, endereco, valor_com_desconto, valor_sem_desconto,
         dia_vencimento, status, numero_iptu, matricula, conta_agua, conta_energia, observacoes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-      [codigo, tipo, endereco, valor_com_desconto || null, valor_sem_desconto,
-       dia_vencimento, status, numero_iptu, matricula, conta_agua, conta_energia, observacoes]
+      [codigo, tipo, endereco, valor_com_desconto || null, valor_sem_desconto || null,
+       dia_vencimento || null, status, numero_iptu, matricula, conta_agua, conta_energia, observacoes]
     );
 
     await logAtividade(req.user.id, 'criar_imovel', 'imoveis', result.rows[0].id, codigo, req.ip);
@@ -779,7 +779,15 @@ app.post('/api/imoveis/:id/alugar', authenticateToken, [
        VALUES ($1,$2,$3,$4,$5,$6,'ativo',$7,$8) RETURNING *`,
       [id, inquilinoId, contrato.data_inicio, contrato.data_fim, contrato.valor, contrato.garantia || 'sem', renovacaoAuto, contrato.observacoes || null]
     );
-    await client.query("UPDATE imoveis SET status='alugado' WHERE id=$1", [id]);
+    // Se um dia de vencimento foi informado ao alugar (útil quando o imóvel foi
+    // cadastrado só como vago, sem vencimento), grava no imóvel — assim as
+    // parcelas usam o dia correto. Senão, mantém o que já existe (ou padrão 10).
+    const diaVenc = parseInt(contrato.dia_vencimento, 10);
+    if (diaVenc >= 1 && diaVenc <= 31) {
+      await client.query("UPDATE imoveis SET status='alugado', dia_vencimento=$2 WHERE id=$1", [id, diaVenc]);
+    } else {
+      await client.query("UPDATE imoveis SET status='alugado' WHERE id=$1", [id]);
+    }
     await client.query('COMMIT');
 
     await gerarParcelasContratoNovo(contrato.data_inicio);
@@ -806,9 +814,18 @@ app.post('/api/imoveis/cadastro-completo', authenticateToken, async (req, res) =
   if (!imovel.codigo || !String(imovel.codigo).trim()) erros.push('Informe o código do imóvel');
   if (!tipos.includes(imovel.tipo)) erros.push('Tipo de imóvel inválido');
   if (!imovel.endereco || String(imovel.endereco).trim().length < 5) erros.push('Endereço muito curto (mín. 5 caracteres)');
-  if (imovel.valor_sem_desconto === '' || imovel.valor_sem_desconto == null || isNaN(parseFloat(imovel.valor_sem_desconto))) erros.push('Informe o valor do aluguel');
   const dia = parseInt(imovel.dia_vencimento, 10);
-  if (!(dia >= 1 && dia <= 31)) erros.push('Dia de vencimento inválido (1 a 31)');
+  const diaValido = dia >= 1 && dia <= 31;
+  const semValor = imovel.valor_sem_desconto === '' || imovel.valor_sem_desconto == null || isNaN(parseFloat(imovel.valor_sem_desconto));
+  if (vincular) {
+    // Com inquilino/contrato, aluguel e vencimento são obrigatórios.
+    if (semValor) erros.push('Informe o valor do aluguel');
+    if (!diaValido) erros.push('Dia de vencimento inválido (1 a 31)');
+  } else if (imovel.dia_vencimento !== '' && imovel.dia_vencimento != null && !diaValido) {
+    // "Cadastrar só o imóvel": aluguel e vencimento são opcionais; mas se um
+    // dia de vencimento foi informado, ele precisa ser válido (1 a 31).
+    erros.push('Dia de vencimento inválido (1 a 31)');
+  }
   if (imovel.status && !statusImovel.includes(imovel.status)) erros.push('Situação do imóvel inválida');
   if (imovel.valor_com_desconto && parseFloat(imovel.valor_com_desconto) > parseFloat(imovel.valor_sem_desconto)) {
     erros.push('Valor com desconto não pode ser maior que o valor sem desconto');
@@ -837,8 +854,8 @@ app.post('/api/imoveis/cadastro-completo', authenticateToken, async (req, res) =
       `INSERT INTO imoveis (codigo, tipo, endereco, valor_com_desconto, valor_sem_desconto,
         dia_vencimento, status, numero_iptu, matricula, conta_agua, conta_energia, observacoes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-      [String(imovel.codigo).trim(), imovel.tipo, imovel.endereco, imovel.valor_com_desconto || null, imovel.valor_sem_desconto,
-       dia, imovel.status || 'vago', imovel.numero_iptu || null, imovel.matricula || null,
+      [String(imovel.codigo).trim(), imovel.tipo, imovel.endereco, imovel.valor_com_desconto || null, (semValor ? null : imovel.valor_sem_desconto),
+       (diaValido ? dia : null), imovel.status || 'vago', imovel.numero_iptu || null, imovel.matricula || null,
        imovel.conta_agua || null, imovel.conta_energia || null, imovel.observacoes || null]
     );
     const novoImovel = imRes.rows[0];
@@ -909,8 +926,8 @@ app.put('/api/imoveis/:id', authenticateToken, [
   body('codigo').trim().isLength({ min: 1, max: 100 }),
   body('tipo').isIn(['casa', 'apartamento', 'comercial', 'terreno', 'galpao']),
   body('endereco').trim().isLength({ min: 5 }),
-  body('valor_sem_desconto').isFloat({ min: 0 }),
-  body('dia_vencimento').isInt({ min: 1, max: 31 }),
+  body('valor_sem_desconto').optional({ values: 'falsy' }).isFloat({ min: 0 }),
+  body('dia_vencimento').optional({ values: 'falsy' }).isInt({ min: 1, max: 31 }),
   body('status').isIn(['alugado', 'vago', 'encerrado', 'negociacao', 'manutencao'])
 ], validate, async (req, res) => {
   try {
@@ -934,8 +951,8 @@ app.put('/api/imoveis/:id', authenticateToken, [
         valor_sem_desconto=$5, dia_vencimento=$6, status=$7, numero_iptu=$8,
         matricula=$9, conta_agua=$10, conta_energia=$11, observacoes=$12, updated_at=NOW()
        WHERE id=$13 RETURNING *`,
-      [codigo, tipo, endereco, valor_com_desconto || null, valor_sem_desconto,
-       dia_vencimento, status, numero_iptu, matricula, conta_agua, conta_energia, observacoes, id]
+      [codigo, tipo, endereco, valor_com_desconto || null, valor_sem_desconto || null,
+       dia_vencimento || null, status, numero_iptu, matricula, conta_agua, conta_energia, observacoes, id]
     );
 
     if (result.rows.length === 0) return res.status(404).json({ error: 'Imóvel não encontrado' });
@@ -1156,8 +1173,8 @@ app.get('/api/imoveis/:id/ficha/pdf', authenticateToken, [
       { label: 'Endereço', valor: im.endereco },
       { label: 'Situação', valor: statusLabel[im.status] || im.status },
       { label: 'Valor (com desconto)', valor: im.valor_com_desconto ? fmtMoeda(im.valor_com_desconto) : '—' },
-      { label: 'Valor (sem desconto)', valor: fmtMoeda(im.valor_sem_desconto) },
-      { label: 'Dia de vencimento', valor: `Dia ${im.dia_vencimento}` },
+      { label: 'Valor (sem desconto)', valor: im.valor_sem_desconto ? fmtMoeda(im.valor_sem_desconto) : '—' },
+      { label: 'Dia de vencimento', valor: im.dia_vencimento ? `Dia ${im.dia_vencimento}` : '—' },
       { label: 'Matrícula', valor: im.matricula || '—' },
       { label: 'Nº IPTU', valor: im.numero_iptu || '—' },
       { label: 'Conta de água', valor: im.conta_agua || '—' },
@@ -4078,6 +4095,11 @@ async function runMigrations() {
           CHECK (status IN ('alugado', 'vago', 'encerrado', 'negociacao', 'manutencao'));
       END $$;
     `);
+    // Permite cadastrar SÓ o imóvel (sem aluguel/vencimento ainda): torna
+    // valor_sem_desconto e dia_vencimento opcionais. O CHECK de dia_vencimento
+    // (1..31) continua válido pois CHECK passa quando o valor é NULL.
+    await pool.query(`ALTER TABLE imoveis ALTER COLUMN valor_sem_desconto DROP NOT NULL`);
+    await pool.query(`ALTER TABLE imoveis ALTER COLUMN dia_vencimento DROP NOT NULL`);
     // Adiciona coluna recorrencia_id em despesas
     await pool.query(`ALTER TABLE despesas ADD COLUMN IF NOT EXISTS recorrencia_id INTEGER`);
     // Índice para busca de série de despesas
