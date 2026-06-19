@@ -21,9 +21,9 @@ ON CONFLICT (codigo) DO NOTHING;
 
 -- Inquilinos de exemplo
 INSERT INTO inquilinos (nome, cpf_cnpj, telefone, email) VALUES
-('João Silva', '123.456.789-00', '(61) 98765-4321', 'joao@email.com'),
+('João Silva', '123.456.789-09', '(61) 98765-4321', 'joao@email.com'),
 ('Maria Santos', '987.654.321-00', '(61) 99876-5432', 'maria@email.com'),
-('Pedro Oliveira', '456.789.123-00', '(61) 97654-3210', 'pedro@email.com')
+('Pedro Oliveira', '456.789.123-64', '(61) 97654-3210', 'pedro@email.com')
 ON CONFLICT (cpf_cnpj) DO NOTHING;
 
 -- Contratos / Pagamentos / Despesas / Reajustes (apenas se vazio)

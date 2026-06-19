@@ -179,9 +179,9 @@ export default function Imoveis() {
     const e = {};
     if (!form.codigo?.trim()) e.codigo = 'Informe o código';
     if (!form.endereco?.trim() || form.endereco.trim().length < 5) e.endereco = 'Endereço deve ter ao menos 5 caracteres';
-    if (form.valor_sem_desconto === '' || form.valor_sem_desconto == null) e.valor_sem_desconto = 'Informe o valor';
-    if (!form.dia_vencimento) e.dia_vencimento = 'Informe o dia';
-    else if (form.dia_vencimento < 1 || form.dia_vencimento > 31) e.dia_vencimento = 'Dia entre 1 e 31';
+    // Aluguel e vencimento são opcionais (imóvel pode ficar só cadastrado/vago).
+    // Mas, se o dia de vencimento for informado, precisa estar entre 1 e 31.
+    if (form.dia_vencimento && (form.dia_vencimento < 1 || form.dia_vencimento > 31)) e.dia_vencimento = 'Dia entre 1 e 31';
     if (
       form.valor_com_desconto && form.valor_sem_desconto &&
       parseFloat(form.valor_com_desconto) > parseFloat(form.valor_sem_desconto)
@@ -284,6 +284,7 @@ export default function Imoveis() {
       nome: '', cpf_cnpj: '', telefone: '', email: '',
       data_inicio: '', data_fim: '',
       valor: String(im.valor_com_desconto || im.valor_sem_desconto || ''),
+      dia_vencimento: im.dia_vencimento || '',
       garantia: 'fiador', renovacao_automatica: true
     });
   };
@@ -299,6 +300,7 @@ export default function Imoveis() {
         contrato: {
           data_inicio: alugarForm.data_inicio, data_fim: alugarForm.data_fim,
           valor: parseFloat(alugarForm.valor), garantia: alugarForm.garantia,
+          dia_vencimento: alugarForm.dia_vencimento || undefined,
           renovacao_automatica: alugarForm.renovacao_automatica
         }
       });
@@ -430,12 +432,12 @@ export default function Imoveis() {
                       <td>{tipoImovel(im.tipo)}</td>
                       <td style={{ maxWidth: 260 }}>{im.endereco}</td>
                       <td>
-                        <strong>{formatMoeda(im.valor_com_desconto || im.valor_sem_desconto)}</strong>
+                        <strong>{(im.valor_com_desconto || im.valor_sem_desconto) ? formatMoeda(im.valor_com_desconto || im.valor_sem_desconto) : '—'}</strong>
                         {im.valor_com_desconto && parseFloat(im.valor_com_desconto) !== parseFloat(im.valor_sem_desconto) && (
                           <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>s/ desc.: {formatMoeda(im.valor_sem_desconto)}</div>
                         )}
                       </td>
-                      <td>Dia {im.dia_vencimento}</td>
+                      <td>{im.dia_vencimento ? `Dia ${im.dia_vencimento}` : '—'}</td>
                       <td><span className={`badge ${st.className}`}>{st.label}</span></td>
                       <td onClick={(e) => e.stopPropagation()}>
                         <div className="table-actions">
@@ -514,8 +516,8 @@ export default function Imoveis() {
 
             <div className="form-grid-3">
               <div className="form-group">
-                <label className="form-label">Valor s/ Desconto <span className="required">*</span></label>
-                <MoneyInput className={`form-control ${erros.valor_sem_desconto ? 'is-invalid' : ''}`} value={f.valor_sem_desconto} onChange={(v) => setF('valor_sem_desconto', v)} required />
+                <label className="form-label">Valor s/ Desconto</label>
+                <MoneyInput className={`form-control ${erros.valor_sem_desconto ? 'is-invalid' : ''}`} value={f.valor_sem_desconto} onChange={(v) => setF('valor_sem_desconto', v)} />
                 {erros.valor_sem_desconto && <div className="form-error">{erros.valor_sem_desconto}</div>}
               </div>
               <div className="form-group">
@@ -524,8 +526,8 @@ export default function Imoveis() {
                 {erros.valor_com_desconto && <div className="form-error">{erros.valor_com_desconto}</div>}
               </div>
               <div className="form-group">
-                <label className="form-label">Dia de Vencimento <span className="required">*</span></label>
-                <input className={`form-control ${erros.dia_vencimento ? 'is-invalid' : ''}`} type="number" min="1" max="31" value={f.dia_vencimento} onChange={(e) => setF('dia_vencimento', e.target.value)} required />
+                <label className="form-label">Dia de Vencimento</label>
+                <input className={`form-control ${erros.dia_vencimento ? 'is-invalid' : ''}`} type="number" min="1" max="31" value={f.dia_vencimento} onChange={(e) => setF('dia_vencimento', e.target.value)} />
                 {erros.dia_vencimento && <div className="form-error">{erros.dia_vencimento}</div>}
               </div>
             </div>
@@ -710,7 +712,7 @@ export default function Imoveis() {
             </div>
 
             <div className="stats-block-label" style={{ margin: '8px 0' }}>Contrato</div>
-            <div className="form-grid">
+            <div className="form-grid-3">
               <div className="form-group">
                 <label className="form-label">Início <span className="required">*</span></label>
                 <input className="form-control" type="date" value={alugarForm.data_inicio} onChange={(e) => setAL('data_inicio', e.target.value)} />
@@ -718,6 +720,10 @@ export default function Imoveis() {
               <div className="form-group">
                 <label className="form-label">Fim <span className="required">*</span></label>
                 <input className="form-control" type="date" value={alugarForm.data_fim} onChange={(e) => setAL('data_fim', e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Dia de vencimento</label>
+                <input className="form-control" type="number" min="1" max="31" placeholder="ex.: 10" value={alugarForm.dia_vencimento} onChange={(e) => setAL('dia_vencimento', e.target.value)} />
               </div>
             </div>
             <div className="form-grid-3">

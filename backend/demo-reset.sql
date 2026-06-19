@@ -29,9 +29,9 @@ INSERT INTO imoveis (codigo, tipo, endereco, valor_sem_desconto, valor_com_desco
 
 -- 3) INQUILINOS
 INSERT INTO inquilinos (nome, cpf_cnpj, telefone, email) VALUES
-('Ana Carolina Souza',  '312.456.789-01', '(11) 98877-1122', 'ana.souza@email.com'),
-('Bruno Oliveira Lima', '405.987.321-09', '(11) 99654-3321', 'bruno.lima@email.com'),
-('Carla Mendes Rocha',  '528.741.963-00', '(11) 97412-8855', 'carla.rocha@email.com');
+('Ana Carolina Souza',  '312.456.789-73', '(11) 98877-1122', 'ana.souza@email.com'),
+('Bruno Oliveira Lima', '405.987.321-79', '(11) 99654-3321', 'bruno.lima@email.com'),
+('Carla Mendes Rocha',  '528.741.963-55', '(11) 97412-8855', 'carla.rocha@email.com');
 
 -- 4) CONTRATOS ATIVOS (IM001/Ana, IM002/Bruno, IM003/Carla)
 INSERT INTO contratos (imovel_id, inquilino_id, data_inicio, data_fim, valor, garantia, status, renovacao_automatica) VALUES
@@ -85,6 +85,6 @@ VALUES (1, 1, 2700.00, (CURRENT_DATE - INTERVAL '8 months')::date, (CURRENT_DATE
 
 -- 8) RECEBEDOR padrão para emissão de recibos
 INSERT INTO recibo_recebedores (nome, documento, padrao)
-VALUES ('Imobiliária Demonstração LTDA', '12.345.678/0001-90', true);
+VALUES ('Imobiliária Demonstração LTDA', '12.345.678/0001-95', true);
 
 COMMIT;
