@@ -3427,8 +3427,8 @@ app.get('/api/relatorios/imoveis/fichas-lista/pdf', authenticateToken, async (re
         endereco: trunc(r.endereco || '—', 30),
         status: statusLabel[r.status] || r.status,
         inquilino_nome: trunc(r.inquilino_nome || '—', 22),
-        aluguel: fmtMoeda(aluguel),
-        venc: `Dia ${r.dia_vencimento}`
+        aluguel: (aluguel != null && aluguel !== '') ? fmtMoeda(aluguel) : '—',
+        venc: r.dia_vencimento ? `Dia ${r.dia_vencimento}` : '—'
       };
       doc.fontSize(8).font('Helvetica').fillColor('#333333');
       defs.forEach((d) => { doc.text(String(valores[d.key] ?? '—'), x, ry, { width: d.w, lineBreak: false }); x += d.w; });
