@@ -154,7 +154,7 @@ export default function Relatorios() {
             <td><strong>{im.codigo}</strong></td>
             <td>{tipoImovel(im.tipo)}</td>
             <td>{im.endereco}</td>
-            <td>{formatMoeda(im.valor_sem_desconto)}</td>
+            <td>{im.valor_sem_desconto ? formatMoeda(im.valor_sem_desconto) : '—'}</td>
             <td><span className={`badge ${statusImovel(im.status).className}`}>{statusImovel(im.status).label}</span></td>
           </tr>
         ))}</tbody>

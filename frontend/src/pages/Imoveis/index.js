@@ -433,7 +433,7 @@ export default function Imoveis() {
                       <td style={{ maxWidth: 260 }}>{im.endereco}</td>
                       <td>
                         <strong>{(im.valor_com_desconto || im.valor_sem_desconto) ? formatMoeda(im.valor_com_desconto || im.valor_sem_desconto) : '—'}</strong>
-                        {im.valor_com_desconto && parseFloat(im.valor_com_desconto) !== parseFloat(im.valor_sem_desconto) && (
+                        {im.valor_com_desconto && im.valor_sem_desconto && parseFloat(im.valor_com_desconto) !== parseFloat(im.valor_sem_desconto) && (
                           <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>s/ desc.: {formatMoeda(im.valor_sem_desconto)}</div>
                         )}
                       </td>
